@@ -100,44 +100,52 @@
 
 ---
 
-## ⏳ PRÓXIMOS PASSOS - Semana 4+
+## ✅ CONCLUÍDO - Semana 4: Fase 2 - Otimização Social
 
-### 4.1 Database Migrations (FALTA IMPLEMENTAR)
+### 4.1 Fase 2 - Otimização Social (IMPLEMENTADO)
+- ✅ Affinity.ts: Entidade com normalização -100 a +100 (UI) e -1.0 a +1.0 (algoritmo)
+- ✅ AffinityMatrix.ts: Matriz esparsa O(A) com métodos de cálculo:
+  - `calculateIsolationScore(studentId, groupStudentIds)`: S(i,g) = Σ A_ij
+  - `calculateGroupCohesion(studentIds)`: soma de pares no grupo
+  - Simetria garantida: A_ij == A_ji
+- ✅ SocialOptimizer.ts: Algoritmo Fase 2 completo
+  - Simulated Annealing com biased sampling
+  - Energia total: E_base (Fase 1) + E_social = -w_soc × cohesion
+  - Metropolis: aceita se ΔE < 0 ou exp(-ΔE/T)
+  - Atualiza métricas sociais (socialCohesionScore) para cada grupo
+- ✅ DistributionEngine.ts: Novo método `solvePhase2()`
+- ✅ generatePhase2Report(): Relatório com coesão social por grupo
+- ✅ Testes unitários criados:
+  - Affinity.test.ts (15 testes)
+  - AffinityMatrix.test.ts (20 testes)
+
+## ⏳ PRÓXIMOS PASSOS - Semana 5
+
+### 5.1 Database Migrations (PRÓXIMO)
 - [ ] Adicionar colunas à tabela `distributions`:
-  - `w_pref` (peso de preferências, default 1.0)
-  - `w_dup` (peso de duplicatas, default 0.9)
-  - `w_div` (peso de diversidade, default 0.35)
-  - `status` (PENDING, READY, PHASE1_COMPLETED, PHASE2_COMPLETED)
+  - `w_pref`, `w_dup`, `w_div` (configuração Fase 1)
+  - `w_soc`, `status`, `social_optimization_enabled` (Fase 2)
 - [ ] Criar tabela `student_affinities` para Fase 2
+- [ ] Adicionar `social_cohesion_score` à tabela groups
 
-### 4.2 Fase 2 - Otimização Social (FALTA IMPLEMENTAR)
-- [ ] Implementar `Affinity.ts` e `AffinityMatrix.ts`
-- [ ] Implementar `SocialOptimizer.ts` completo
-- [ ] Endpoints para declaração de afinidades
-- [ ] Endpoints para execução de Fase 2
+### 5.2 API (PRÓXIMO)
+- [ ] Endpoint `PUT /distributions/:id/energy-config` (configurar pesos Fase 1)
+- [ ] Endpoint `POST /execute-phase1` (executar Fase 1, status → PHASE1_COMPLETED)
+- [ ] Endpoint `POST /execute-phase2` (executar Fase 2, status → PHASE2_COMPLETED)
+- [ ] Endpoints de afinidades:
+  - `GET /students/:studentId/current-group` (grupo após Fase 1)
+  - `PUT /students/:studentId/affinities` (submeter afinidades)
+  - `GET /students/:studentId/affinities` (recuperar afinidades)
 
-### 3.3 Banco de Dados (FALTA IMPLEMENTAR)
-- [ ] Migração: adicionar w_pref, w_dup, w_div, status à tabela distributions
-- [ ] Nova tabela: student_affinities (para Fase 2)
-- [ ] Adicionar campo social_cohesion_score à tabela groups
-
-### 3.4 API (FALTA IMPLEMENTAR)
-- [ ] Endpoint `PUT /distributions/:id/energy-config` (configurar pesos)
-- [ ] Endpoint `POST /execute-phase1` (executar Fase 1)
-- [ ] Endpoint `POST /execute-phase2` (executar Fase 2 - Fase 2)
-- [ ] Endpoints de afinidades (Fase 2)
-
-### 3.5 Frontend (FALTA IMPLEMENTAR)
-- [ ] UI para configurar pesos Fase 1
-- [ ] Página AffinityInputPage (slider -100 a +100)
-- [ ] Dois botões: "Executar Fase 1" / "Executar Fase 2"
-- [ ] Exibir social_cohesion_score
-
-### 4.0 Fase 2 Social (FALTA IMPLEMENTAR)
-- [ ] Affinity.ts (entidade)
-- [ ] AffinityMatrix.ts (matriz esparsa)
-- [ ] SocialOptimizer.ts (otimização com afinidades)
-- [ ] Endpoints de afinidades
+### 5.3 Frontend (PRÓXIMO)
+- [ ] Página `AffinityInputPage.tsx` (sliders -100 a +100)
+- [ ] Atualizar `OrganizerDashboard.tsx`:
+  - Config pesos Fase 1
+  - Config Fase 2 (w_soc, iterations)
+  - Dois botões: "Executar Fase 1" / "Executar Fase 2"
+  - Badge de status
+- [ ] Atualizar `StudentResultPage.tsx`:
+  - Exibir social_cohesion_score do grupo
 
 ---
 
@@ -187,9 +195,17 @@
   ✅ backend/src/services/optimization/SolutionGenerator.test.ts (NOVO)
   ✅ backend/src/services/optimization/DistributionEngine.ts (REFATORADO)
 
-⏳ Semana 4+: Fase 2 Social
-  ⏳ backend/src/domain/Affinity.ts (FALTA)
-  ⏳ backend/src/domain/AffinityMatrix.ts (FALTA)
-  ⏳ backend/src/services/optimization/SocialOptimizer.ts (FALTA COMPLETAR)
-  ⏳ supabase/migrations/003_social_optimization.sql (FALTA)
+✅ Semana 4: Fase 2 - Otimização Social
+  ✅ backend/src/domain/Affinity.ts (NOVO)
+  ✅ backend/src/domain/Affinity.test.ts (NOVO)
+  ✅ backend/src/domain/AffinityMatrix.ts (NOVO)
+  ✅ backend/src/domain/AffinityMatrix.test.ts (NOVO)
+  ✅ backend/src/services/optimization/SocialOptimizer.ts (NOVO)
+  ✅ backend/src/services/optimization/DistributionEngine.ts (ATUALIZADO - solvePhase2, generatePhase2Report)
+
+⏳ Semana 5+: API + Frontend + Database
+  ⏳ supabase/migrations/004_social_optimization.sql
+  ⏳ Database methods (CRUD afinidades, status updates)
+  ⏳ API endpoints (Fase 1 e Fase 2)
+  ⏳ Frontend pages (AffinityInputPage, dashboard updates)
 ```
