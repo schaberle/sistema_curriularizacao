@@ -5,6 +5,7 @@ import { LoginPage } from './pages/LoginPage';
 import { StudentFormPage } from './pages/StudentFormPage';
 import { StudentPreferencesPage } from './pages/StudentPreferencesPage';
 import { StudentResultPage } from './pages/StudentResultPage';
+import { AffinityInputPage } from './pages/AffinityInputPage';
 import { OrganizerDashboard } from './pages/OrganizerDashboard';
 
 /**
@@ -22,6 +23,7 @@ function App() {
           {/* Alunos */}
           <Route path="/student/form/:distributionId" element={<StudentFormPage />} />
           <Route path="/student/:studentId/preferences/:distributionId" element={<StudentPreferencesPage />} />
+          <Route path="/student/:studentId/affinities/:distributionId" element={<AffinityInputPage />} />
           <Route path="/student/result/:distributionId" element={<StudentResultPage />} />
 
           {/* Organizadores */}
