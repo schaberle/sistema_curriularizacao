@@ -306,4 +306,11 @@ export class SimulatedAnnealing {
     if (delta <= 0) return 1.0; // Sempre aceita se melhorou
     return Math.exp(-delta / temperature);
   }
+
+  /**
+   * Define pesos customizados para o EnergyCalculator
+   */
+  public setWeights(config: { wPref?: number; wDup?: number; wDiv?: number }) {
+    this.energyCalculator = new EnergyCalculator(config);
+  }
 }

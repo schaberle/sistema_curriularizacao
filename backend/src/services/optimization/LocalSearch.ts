@@ -42,7 +42,7 @@ export class LocalSearch {
     let iterationsWithoutImprovement = 0;
     let currentEnergy = this.calculateSolutionEnergy(currentSolution);
 
-    console.log(`[LocalSearch] Energia inicial: ${currentEnergy.toFixed(2)}`);
+    console.log(`[LocalSearch] Energia inicial: ${currentEnergy.toFixed(4)}`);
 
     while (iterationsWithoutImprovement < this.maxIterationsWithoutImprovement) {
       const improved = this.perform2Opt(currentSolution);
@@ -50,66 +50,58 @@ export class LocalSearch {
       if (improved) {
         const newEnergy = this.calculateSolutionEnergy(improved);
 
-        // Se REDUZIU energia, aceita e reseta contador
         if (newEnergy < currentEnergy) {
           currentSolution = improved;
           currentEnergy = newEnergy;
           iterationsWithoutImprovement = 0;
-          console.log(`[LocalSearch] Melhoria encontrada. Energia: ${newEnergy.toFixed(2)}`);
+          console.log(`[LocalSearch] Energia melhorou: ${newEnergy.toFixed(4)}`);
         } else {
           iterationsWithoutImprovement++;
         }
       } else {
-        // Nenhum movimento melhorou, termina
-        break;
+        iterationsWithoutImprovement++;
       }
     }
 
-    console.log(`[LocalSearch] Energia final: ${currentEnergy.toFixed(2)}`);
+    console.log(`[LocalSearch] Energia final: ${currentEnergy.toFixed(4)}`);
     currentSolution.totalEnergy = currentEnergy;
     return currentSolution;
   }
 
   /**
-   * Executa uma rodada de 2-opt
-   * Tenta trocar cada aluno de um grupo com alunos de outros grupos
+   * Uma rodada de 2-opt: procura por melhorias trocando 2 alunos
    */
   private perform2Opt(solution: Solution): Solution | null {
     const groups = solution.groups;
 
-    // Tenta cada par de grupos
+    // Tentar todas as combinações de pares de grupos
     for (let i = 0; i < groups.length; i++) {
       for (let j = i + 1; j < groups.length; j++) {
         const groupA = groups[i];
         const groupB = groups[j];
 
-        // Tenta trocar cada aluno de A com cada aluno de B
+        // Tentar trocar cada par de alunos
         for (const studentA of groupA.students) {
           for (const studentB of groupB.students) {
-            const energyDelta = this.calculateSwapDelta(
-              studentA,
-              studentB,
-              groupA,
-              groupB
-            );
+            if (this.canPerformSwap(studentA, studentB, groupA, groupB)) {
+              const delta = this.calculateSwapDelta(studentA, studentB, groupA, groupB);
 
-            // Se a troca REDUZ energia (delta < 0), faz a troca
-            if (energyDelta < 0) {
-              return this.performSwap(solution, studentA, studentB, groupA, groupB);
+              // Aceita se reduz energia (delta < 0)
+              if (delta < 0 && Number.isFinite(delta)) {
+                return this.performSwap(solution, studentA, studentB, groupA, groupB);
+              }
             }
           }
         }
       }
     }
 
-    // Nenhuma troca melhorou
     return null;
   }
 
   /**
-   * Calcula delta de energia ao trocar dois alunos
-   *
-   * IMPORTANTE: delta < 0 significa MELHORIA (redução de energia)
+   * Calcula delta de energia ao trocar dois alunos entre grupos
+   * Delta < 0 significa melhoria
    */
   private calculateSwapDelta(
     studentA: Student,
@@ -117,23 +109,18 @@ export class LocalSearch {
     groupA: Group,
     groupB: Group
   ): number {
-    // Verificar se troca mantém viabilidade
-    if (!this.canPerformSwap(studentA, studentB, groupA, groupB)) {
-      return Infinity; // Troca violaria restrições
-    }
-
-    // Calcular energia ANTES do swap
     const themeA = this.themes.find(t => t.id === groupA.themeId);
     const themeB = this.themes.find(t => t.id === groupB.themeId);
 
     if (!themeA || !themeB) {
-      return Infinity; // Temas não encontrados
+      return Infinity;
     }
 
+    // Energia ANTES
     const energyBefore = this.energyCalculator.calculateGroupEnergy(groupA, themeA) +
                          this.energyCalculator.calculateGroupEnergy(groupB, themeB);
 
-    // Criar cópias pós-swap
+    // Criar grupos APÓS troca
     const newGroupA = new Group(
       groupA.id,
       groupA.themeId,
@@ -268,194 +255,11 @@ export class LocalSearch {
 
     return totalEnergy;
   }
-  }
 
   /**
-   * Executa a troca de dois alunos entre grupos
+   * Define pesos customizados para o EnergyCalculator
    */
-  private performSwap(
-    solution: Solution,
-    studentA: Student,
-    studentB: Student,
-    groupA: Group,
-    groupB: Group
-  ): Solution {
-    // Criar novos grupos após troca
-    const newGroupA = new Group(
-      groupA.id,
-      groupA.themeId,
-      groupA.distributionId,
-      groupA.students.filter(s => s.id !== studentA.id).concat([studentB])
-    );
-
-    const newGroupB = new Group(
-      groupB.id,
-      groupB.themeId,
-      groupB.distributionId,
-      groupB.students.filter(s => s.id !== studentB.id).concat([studentA])
-    );
-
-    // Substituir grupos na solução
-    const newGroups = solution.groups.map(g => {
-      if (g.id === groupA.id) return newGroupA;
-      if (g.id === groupB.id) return newGroupB;
-      return g;
-    });
-
-    // Criar nova solução
-    const newSolution = new Solution(newGroups, [], 0);
-    const violations = this.validator.validateGroups(newGroups);
-    newSolution.constraintViolations = violations;
-
-    return newSolution;
-  }
-
-  /**
-   * Executa 3-opt (mais complexo, opcional para melhor qualidade)
-   * Move 3 alunos simultaneamente para melhorar ainda mais
-   */
-  optimize3Opt(solution: Solution, maxIterations: number = 50): Solution {
-    let currentSolution = solution;
-    let iteration = 0;
-
-    while (iteration < maxIterations) {
-      const improved = this.perform3OptPass(currentSolution);
-
-      if (improved) {
-        const newScore = this.scorer.calculateSolutionScore(improved);
-        const oldScore = this.scorer.calculateSolutionScore(currentSolution);
-
-        if (newScore > oldScore) {
-          currentSolution = improved;
-          iteration++;
-        } else {
-          break;
-        }
-      } else {
-        break;
-      }
-    }
-
-    return currentSolution;
-  }
-
-  /**
-   * Uma rodada de 3-opt (simplificado)
-   */
-  private perform3OptPass(solution: Solution): Solution | null {
-    const groups = solution.groups;
-
-    // Tentar mover um aluno de um grupo para outro
-    // (versão simplificada do verdadeiro 3-opt)
-    for (let i = 0; i < groups.length; i++) {
-      for (let j = 0; j < groups.length; j++) {
-        if (i === j) continue;
-
-        const sourceGroup = groups[i];
-        const targetGroup = groups[j];
-
-        for (const student of sourceGroup.students) {
-          // Tentar mover estudante de sourceGroup para targetGroup
-          if (this.canMoveStudent(student, sourceGroup, targetGroup)) {
-            const delta = this.calculateMovementDelta(student, sourceGroup, targetGroup);
-
-            if (delta > 0) {
-              return this.performMove(solution, student, sourceGroup, targetGroup);
-            }
-          }
-        }
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Verifica se pode mover aluno mantendo restrições
-   */
-  private canMoveStudent(
-    student: Student,
-    fromGroup: Group,
-    toGroup: Group
-  ): boolean {
-    // Grupo fonte precisa ter pelo menos 1 aluno (mas idealmente 4)
-    if (fromGroup.getStudentCount() <= 1) {
-      return false;
-    }
-
-    // Grupo alvo não pode estar cheio
-    if (toGroup.isFull()) {
-      return false;
-    }
-
-    // Criar cópias temporárias
-    const tempFrom = new Group(
-      fromGroup.id,
-      fromGroup.themeId,
-      fromGroup.distributionId,
-      fromGroup.students.filter(s => s.id !== student.id)
-    );
-
-    const tempTo = new Group(
-      toGroup.id,
-      toGroup.themeId,
-      toGroup.distributionId,
-      toGroup.students.concat([student])
-    );
-
-    // Ambos devem satisfazer restrições críticas
-    // Nota: grupo fonte pode ficar vazio, isso é tratado na validação
-    const violationsFrom = this.validator.validateGroup(tempFrom)
-      .filter(v => v.severity === 'CRITICAL');
-    const violationsTo = this.validator.validateGroup(tempTo)
-      .filter(v => v.severity === 'CRITICAL');
-
-    return violationsFrom.length === 0 && violationsTo.length === 0;
-  }
-
-  /**
-   * Calcula delta de score ao mover um aluno
-   */
-  private calculateMovementDelta(
-    student: Student,
-    fromGroup: Group,
-    toGroup: Group
-  ): number {
-    return this.scorer.calculateMovementDelta(student, fromGroup, toGroup);
-  }
-
-  /**
-   * Executa movimento de um aluno
-   */
-  private performMove(
-    solution: Solution,
-    student: Student,
-    fromGroup: Group,
-    toGroup: Group
-  ): Solution {
-    const newGroupFrom = new Group(
-      fromGroup.id,
-      fromGroup.themeId,
-      fromGroup.distributionId,
-      fromGroup.students.filter(s => s.id !== student.id)
-    );
-
-    const newGroupTo = new Group(
-      toGroup.id,
-      toGroup.themeId,
-      toGroup.distributionId,
-      toGroup.students.concat([student])
-    );
-
-    // Substituir na solução
-    const newGroups = solution.groups
-      .filter(g => g.id !== fromGroup.id && g.id !== toGroup.id)
-      .concat([newGroupFrom, newGroupTo]);
-
-    const newSolution = new Solution(newGroups, [], 0);
-    const violations = this.validator.validateGroups(newGroups);
-    newSolution.constraintViolations = violations;
-
-    return newSolution;
+  public setWeights(config: { wPref?: number; wDup?: number; wDiv?: number }) {
+    this.energyCalculator = new EnergyCalculator(config);
   }
 }

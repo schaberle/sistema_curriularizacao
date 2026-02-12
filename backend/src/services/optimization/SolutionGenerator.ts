@@ -1,24 +1,31 @@
 import { Student, Group, Theme, Solution } from '../../domain';
-import { ConstraintValidator } from './ConstraintValidator';
+import { EnergyCalculator } from './EnergyCalculator';
 
 /**
- * SolutionGenerator - Gera uma solução inicial viável
+ * SolutionGenerator - Gera uma solução inicial viável (Fase 1)
  *
- * Estratégia:
- * 1. Ordena alunos por preferências agregadas (quantos preferem cada tema)
- * 2. Para cada tema, forma grupos com alunos que o preferem
- * 3. Garante restrições CRÍTICAS (composição EE e diversidade de fases)
- * 4. Aloca alunos restantes em temas com menos grupos
+ * Estratégia (Modelo de Energia - Sistema Ideal):
+ * 1. Para cada tema, tentar formar grupos que minimizam energia
+ * 2. Usa EnergyCalculator para avaliar E(grupo, tema)
+ * 3. Construção gulosa: escolhe alunos que reduzem energia
+ * 4. Garante restrições CRÍTICAS via máscara dura (E = ∞)
+ * 5. Aloca alunos restantes em temas com menos grupos
  */
 export class SolutionGenerator {
-  private validator: ConstraintValidator;
+  private energyCalculator: EnergyCalculator;
 
-  constructor() {
-    this.validator = new ConstraintValidator();
+  constructor(config?: { wPref?: number; wDup?: number; wDiv?: number }) {
+    this.energyCalculator = new EnergyCalculator(config);
   }
 
   /**
-   * Gera uma solução inicial viável
+   * Gera uma solução inicial viável (Modelo de Energia)
+   *
+   * Estratégia gulosa:
+   * 1. Para cada aluno não alocado, encontrar a melhor colocação
+   * 2. Colocação = (tema, grupo) que minimiza energia total
+   * 3. Se nenhuma colocação viável, criar novo grupo
+   * 4. Retorna solução com energia calculada
    */
   generateInitialSolution(
     students: Student[],
@@ -30,171 +37,149 @@ export class SolutionGenerator {
 
     const groups: Group[] = [];
     const allocatedStudents = new Set<string>();
+    let totalEnergy = 0;
 
-    // 1. Para cada tema, tentar formar grupos
-    for (const theme of themes) {
-      for (let i = 0; i < theme.maxGroups; i++) {
-        const group = this.formGroupForTheme(
-          students,
-          theme,
-          allocatedStudents
-        );
+    // Fase 1: Formar grupos gulosa
+    // Para cada aluno, encontrar melhor colocação (tema + grupo) que minimiza energia
+    const unallocatedStudents = [...students].sort(() => Math.random() - 0.5); // Shuffle
 
-        if (group && group.getStudentCount() > 0) {
-          groups.push(group);
+    for (const student of unallocatedStudents) {
+      if (allocatedStudents.has(student.id)) continue;
 
-          // Marcar alunos como alocados
-          for (const student of group.students) {
-            allocatedStudents.add(student.id);
+      let bestGroup: Group | null = null;
+      let bestTheme: Theme | null = null;
+      let bestEnergy = Infinity;
+
+      // Tentar cada tema
+      for (const theme of themes) {
+        // Opção 1: Adicionar a um grupo existente para este tema
+        const groupsForTheme = groups.filter(g => g.themeId === theme.id && !g.isFull());
+
+        for (const group of groupsForTheme) {
+          const testGroup = this.createTestGroup(group, student);
+          const energy = this.energyCalculator.calculateGroupEnergy(testGroup, theme);
+
+          if (energy < bestEnergy && energy !== Infinity) {
+            bestEnergy = energy;
+            bestGroup = group;
+            bestTheme = theme;
           }
         }
+
+        // Opção 2: Criar novo grupo com este aluno
+        if (groups.filter(g => g.themeId === theme.id).length < theme.maxGroups) {
+          const newGroup = new Group(
+            `group_${groups.length}_${student.id}`,
+            theme.id,
+            'dist_temp',
+            [student]
+          );
+
+          const energy = this.energyCalculator.calculateGroupEnergy(newGroup, theme);
+
+          if (energy < bestEnergy) {
+            bestEnergy = energy;
+            bestGroup = newGroup;
+            bestTheme = theme;
+          }
+        }
+      }
+
+      // Aplicar melhor colocação
+      if (bestGroup && bestTheme) {
+        if (!bestGroup.students.includes(student)) {
+          bestGroup.addStudent(student);
+          // Apenas adicionar grupo se é novo (não estava em groups)
+          if (!groups.includes(bestGroup)) {
+            groups.push(bestGroup);
+          }
+        }
+
+        allocatedStudents.add(student.id);
+        totalEnergy += bestEnergy;
       }
     }
 
-    // 2. Alocar alunos restantes em temas com menos grupos
-    const remainingStudents = students.filter(s => !allocatedStudents.has(s.id));
+    // Fase 2: Alocar alunos não colocáveis em qualquer grupo (último recurso)
+    const remainingStudents = unallocatedStudents.filter(s => !allocatedStudents.has(s.id));
 
     for (const student of remainingStudents) {
-      // Encontrar tema com menos grupos
-      const themeCounts = new Map<string, number>();
-      for (const theme of themes) {
-        themeCounts.set(theme.id, 0);
-      }
+      // Tenta adicionar a um grupo que violará restrições (como último recurso)
+      let addedToGroup = false;
 
       for (const group of groups) {
-        themeCounts.set(group.themeId, (themeCounts.get(group.themeId) || 0) + 1);
-      }
-
-      // Encontrar grupo não cheio com menos grupos daquele tema
-      let assignedToGroup = false;
-
-      // Ordenar temas por número de grupos (menos grupos primeiro)
-      const sortedThemes = [...themes].sort((a, b) => {
-        const countA = themeCounts.get(a.id) || 0;
-        const countB = themeCounts.get(b.id) || 0;
-        return countA - countB;
-      });
-
-      for (const theme of sortedThemes) {
-        // Encontrar grupo não cheio para este tema
-        const groupsForTheme = groups.filter(g => g.themeId === theme.id);
-        const notFullGroups = groupsForTheme.filter(g => !g.isFull());
-
-        for (const group of notFullGroups) {
-          // Verificar se pode adicionar mantendo restrições críticas
-          if (this.canAddStudentToGroup(student, group)) {
-            try {
-              group.addStudent(student);
-              allocatedStudents.add(student.id);
-              assignedToGroup = true;
-              break;
-            } catch {
-              // Continuar tentando outro grupo
-            }
+        if (!group.isFull()) {
+          try {
+            group.addStudent(student);
+            allocatedStudents.add(student.id);
+            addedToGroup = true;
+            break;
+          } catch {
+            // Continuar tentando outro grupo
           }
         }
-
-        if (assignedToGroup) break;
       }
 
-      // Se não conseguiu alocar em grupo existente, criar novo
-      if (!assignedToGroup) {
-        const theme = sortedThemes[0];
-        const groupId = `group_${groups.length}`;
-        const newGroup = new Group(groupId, theme.id, 'dist_temp', [student]);
+      // Se ainda não foi alocado, criar grupo novo mesmo que incompleto
+      if (!addedToGroup && remainingStudents.length > 0) {
+        const theme = groups.length > 0 ?
+          themes[groups.length % themes.length] :
+          themes[0];
+
+        const newGroup = new Group(
+          `group_remaining_${groups.length}`,
+          theme.id,
+          'dist_temp',
+          [student]
+        );
+
         groups.push(newGroup);
         allocatedStudents.add(student.id);
       }
     }
 
-    // 3. Validar solução
-    const solution = new Solution(groups, [], 0);
-    const violations = this.validator.validateGroups(groups);
-    solution.constraintViolations = violations;
+    // Calcular energia total da solução
+    for (const group of groups) {
+      const theme = themes.find(t => t.id === group.themeId);
+      if (theme) {
+        const energy = this.energyCalculator.calculateGroupEnergy(group, theme);
+        if (energy === Infinity) {
+          totalEnergy = Infinity;
+          break;
+        }
+        totalEnergy += energy;
+      }
+    }
 
+    const solution = new Solution(groups, [], 0, 0, 0, totalEnergy);
     return solution;
   }
 
   /**
-   * Forma um grupo para um tema específico
+   * Cria um grupo de teste adicionando um aluno temporariamente
+   * Usado para avaliar energia antes de fazer a adição real
    */
-  private formGroupForTheme(
-    students: Student[],
-    theme: Theme,
-    allocatedStudents: Set<string>
-  ): Group {
-    const groupId = `group_${Math.random().toString(36).substring(7)}`;
-    const group = new Group(groupId, theme.id, 'dist_temp');
-
-    // Candidatos: alunos não alocados que preferem este tema
-    const candidates = students.filter(s =>
-      !allocatedStudents.has(s.id) && s.hasPreferenceFor(theme.id)
-    );
-
-    // Ordenar por rank de preferência (mais preferido primeiro)
-    const sorted = [...candidates].sort((a, b) => {
-      const rankA = a.getThemeRank(theme.id);
-      const rankB = b.getThemeRank(theme.id);
-      return rankA - rankB;
-    });
-
-    // Tentar montar um grupo viável
-    for (const student of sorted) {
-      if (group.isFull()) break;
-
-      if (this.canAddStudentToGroup(student, group)) {
-        try {
-          group.addStudent(student);
-        } catch {
-          // Continuar tentando próximo aluno
-        }
-      }
-    }
-
-    return group;
-  }
-
-  /**
-   * Verifica se pode adicionar aluno a um grupo mantendo restrições críticas
-   */
-  private canAddStudentToGroup(student: Student, group: Group): boolean {
-    // Criar uma cópia temporária para testar
-    const tempGroup = new Group(
+  private createTestGroup(group: Group, student: Student): Group {
+    const testGroup = new Group(
       group.id,
       group.themeId,
       group.distributionId,
-      [...group.students]
+      [...group.students, student]
     );
-
-    try {
-      tempGroup.addStudent(student);
-    } catch {
-      return false;
-    }
-
-    // Verificar restrições críticas
-    const composition = tempGroup.getComposition();
-
-    // Restrição 1: 1-2 alunos de EE
-    if (composition.electricalCount < 1 || composition.electricalCount > 2) {
-      return false;
-    }
-
-    // Restrição 2: Mínimo 2 fases diferentes
-    if (composition.phases.size < 2) {
-      return false;
-    }
-
-    return true;
+    return testGroup;
   }
 
   /**
-   * Valida se solução é viável (sem violações críticas)
+   * Obtém a configuração de pesos do EnergyCalculator
    */
-  isSolutionFeasible(solution: Solution): boolean {
-    const criticalViolations = solution.constraintViolations.filter(
-      v => v.severity === 'CRITICAL'
-    );
-    return criticalViolations.length === 0;
+  getWeights() {
+    return this.energyCalculator.getWeights();
+  }
+
+  /**
+   * Define pesos customizados para o EnergyCalculator
+   */
+  setWeights(config: { wPref?: number; wDup?: number; wDiv?: number }) {
+    this.energyCalculator = new EnergyCalculator(config);
   }
 }
