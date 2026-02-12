@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "mcp__d6daa664-eb35-4707-8afb-a18e5331c5cb__apply_migration",
+      "mcp__d6daa664-eb35-4707-8afb-a18e5331c5cb__execute_sql",
+      "Bash(npm install:*)",
+      "Bash(pip install:*)",
+      "Bash(.py$)",
+      "Bash(.sh$)",
+      "Bash(.bat$)",
+      "Bash(.sql$)",
+      "Bash(.gitignore$ \")",
+      "Bash(ls:*)",
+      "Bash(npm init:*)",
+      "Bash(npm create vite@latest:*)",
+      "Bash(npx tailwindcss init -p)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git config:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}
