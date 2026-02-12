@@ -1,4 +1,5 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
+import { supabase } from './supabase';
 
 /**
  * API Client - Cliente HTTP para comunicação com backend
@@ -23,10 +24,10 @@ class APIClient {
     });
 
     // Interceptador: adicionar token JWT às requisições
-    this.client.interceptors.request.use((config) => {
-      const token = localStorage.getItem('token');
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+    this.client.interceptors.request.use(async (config) => {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.access_token) {
+        config.headers.Authorization = `Bearer ${data.session.access_token}`;
       }
       return config;
     });
@@ -34,11 +35,10 @@ class APIClient {
     // Interceptador: tratar erros
     this.client.interceptors.response.use(
       (response) => response,
-      (error: AxiosError) => {
+      async (error: AxiosError) => {
         if (error.response?.status === 401) {
           // Token expirado, logout
-          localStorage.removeItem('token');
-          localStorage.removeItem('organizerId');
+          await supabase.auth.signOut();
           window.location.href = '/login';
         }
         return Promise.reject(error);
@@ -144,6 +144,72 @@ class APIClient {
   async getDistributionResults(distributionId: string) {
     const response = await this.client.get(
       `/api/organizer/distributions/${distributionId}/results`
+    );
+    return response.data;
+  }
+
+  async executePhase1(distributionId: string, config?: { wPref?: number; wDup?: number; wDiv?: number }) {
+    const response = await this.client.post(
+      `/api/organizer/distributions/${distributionId}/execute-phase1`,
+      config || {}
+    );
+    return response.data;
+  }
+
+  async executePhase2(
+    distributionId: string,
+    config?: { wSoc?: number; maxIterations?: number; temperature?: number }
+  ) {
+    const response = await this.client.post(
+      `/api/organizer/distributions/${distributionId}/execute-phase2`,
+      config || {}
+    );
+    return response.data;
+  }
+
+  async configureSocialOptimization(
+    distributionId: string,
+    config: { enabled: boolean; wSoc?: number; maxIterations?: number; temperature?: number }
+  ) {
+    const response = await this.client.put(
+      `/api/organizer/distributions/${distributionId}/social-config`,
+      config
+    );
+    return response.data;
+  }
+
+  async getSocialMetrics(distributionId: string) {
+    const response = await this.client.get(
+      `/api/organizer/distributions/${distributionId}/social-metrics`
+    );
+    return response.data;
+  }
+
+  // ============================================================
+  // STUDENTS - AFFINITY (PHASE 2)
+  // ============================================================
+
+  async getStudentCurrentGroup(studentId: string) {
+    const response = await this.client.get(
+      `/api/students/${studentId}/current-group`
+    );
+    return response.data;
+  }
+
+  async getStudentAffinities(studentId: string) {
+    const response = await this.client.get(
+      `/api/students/${studentId}/affinities`
+    );
+    return response.data;
+  }
+
+  async submitStudentAffinities(
+    studentId: string,
+    affinities: Array<{ targetStudentId: string; value: number }>
+  ) {
+    const response = await this.client.put(
+      `/api/students/${studentId}/affinities`,
+      { affinities }
     );
     return response.data;
   }
