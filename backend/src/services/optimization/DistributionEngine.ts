@@ -128,8 +128,8 @@ export class DistributionEngine {
     report += `✓ Satisfação: ${scoreBreakdown.satisfactionScore.toFixed(0)}\n`;
     report += `✓ Penalidades: ${scoreBreakdown.penaltyScore.toFixed(0)}\n`;
     report += `✓ Média por Aluno: ${scoreBreakdown.averagePerStudent.toFixed(2)}\n`;
-    report += `✓ Média por Grupo: ${scoreBreakdown.averagePerGroup.toFixed(2)}\n';
-    report += `✓ Grau de Satisfação: ${this.scorer.getSatisfactionGrade(solution)}\n';
+    report += `✓ Média por Grupo: ${scoreBreakdown.averagePerGroup.toFixed(2)}\n`;
+    report += `✓ Grau de Satisfação: ${this.scorer.getSatisfactionGrade(solution)}\n`;
     report += `✓ Score Normalizado: ${this.scorer.normalizeScore(solution).toFixed(1)}/100\n\n`;
 
     // Detalhes das Violações

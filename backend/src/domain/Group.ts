@@ -152,7 +152,7 @@ export class Group {
   /**
    * Obtém lista de fases no grupo
    */
-  getPhases(): Set<typeof this.students[0].phase> {
+  getPhases(): Set<number> {
     return new Set(this.students.map(s => s.phase));
   }
 
