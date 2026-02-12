@@ -3,6 +3,8 @@ import { SolutionGenerator } from './SolutionGenerator';
 import { LocalSearch } from './LocalSearch';
 import { SimulatedAnnealing } from './SimulatedAnnealing';
 import { EnergyCalculator } from './EnergyCalculator';
+import { SocialOptimizer } from './SocialOptimizer';
+import { AffinityMatrix } from '../../domain/AffinityMatrix';
 
 /**
  * DistributionEngine - Orquestrador do algoritmo de otimização (Modelo de Energia Ideal)
@@ -24,7 +26,7 @@ import { EnergyCalculator } from './EnergyCalculator';
  *
  * Fase 2 - Otimização Social (opcional):
  *    - SocialOptimizer: refina grupos com base em afinidades
- *    - Fora do escopo desta classe por enquanto
+ *    - Método solvePhase2(solution, affinityMatrix, config) implementado
  */
 export class DistributionEngine {
   private generator: SolutionGenerator;
@@ -112,6 +114,51 @@ export class DistributionEngine {
   }
 
   /**
+   * Executa Fase 2: Otimização social com base em afinidades
+   *
+   * **Entrada**: Solução da Fase 1 + Matriz de afinidades + Configuração
+   * **Saída**: Solução ajustada com métricas sociais
+   *
+   * **Requer**: Fase 1 já foi executada
+   */
+  async solvePhase2(
+    phase1Solution: Solution,
+    affinityMatrix: AffinityMatrix,
+    themes: Theme[],
+    config?: {
+      wSoc?: number;
+      maxIterations?: number;
+      temperature?: number;
+    }
+  ): Promise<{
+    solution: Solution;
+    report: string;
+    executionTime: number;
+  }> {
+    const startTime = Date.now();
+
+    console.log(`[DistributionEngine] Iniciando Fase 2 (Otimização Social) com matriz de ${affinityMatrix.getSize()} afinidades`);
+
+    const phase2Start = Date.now();
+    const socialOptimizer = new SocialOptimizer(
+      affinityMatrix,
+      this.energyCalculator,
+      config
+    );
+
+    const solution = socialOptimizer.optimize(phase1Solution, themes);
+    const phase2Time = Date.now() - phase2Start;
+
+    const totalTime = Date.now() - startTime;
+
+    return {
+      solution,
+      report: this.generatePhase2Report(solution, phase2Time),
+      executionTime: totalTime
+    };
+  }
+
+  /**
    * Gera relatório detalhado da Fase 1 (Modelo de Energia)
    */
   private generatePhase1Report(
@@ -175,6 +222,60 @@ export class DistributionEngine {
         const rank = student.getThemeRank(group.themeId);
         const rankStr = rank <= 8 ? `posição ${rank}` : 'sem preferência';
         report += `    - ${student.name} (${student.course}, Fase ${student.phase}) - ${rankStr}\n`;
+      }
+    }
+
+    report += '\n═══════════════════════════════════════════════════════════\n';
+
+    return report;
+  }
+
+  /**
+   * Gera relatório da Fase 2 (Otimização Social)
+   */
+  private generatePhase2Report(
+    solution: Solution,
+    phase2Time: number
+  ): string {
+    let report = '═══════════════════════════════════════════════════════════\n';
+    report += 'RELATÓRIO DE FASE 2 (OTIMIZAÇÃO SOCIAL)\n';
+    report += '═══════════════════════════════════════════════════════════\n\n';
+
+    // Resultado Final
+    report += '📊 RESULTADO FINAL\n';
+    report += '───────────────────────────────────────────────────────────\n';
+    report += `✓ Grupos Mantidos: ${solution.getGroupCount()}\n`;
+    report += `✓ Alunos Alocados: ${solution.getAllocatedStudentCount()}\n`;
+    report += `✓ Energia Total: ${solution.getTotalEnergy().toFixed(4)}\n\n`;
+
+    // Timing
+    report += '⏱️  TEMPO DE EXECUÇÃO\n';
+    report += '───────────────────────────────────────────────────────────\n';
+    report += `✓ Fase 2 (Otimização Social): ${phase2Time}ms\n\n`;
+
+    // Detalhes por Grupo
+    report += '👥 COESÃO SOCIAL DOS GRUPOS\n';
+    report += '───────────────────────────────────────────────────────────\n';
+
+    for (let i = 0; i < solution.groups.length; i++) {
+      const group = solution.groups[i];
+      const socialScore = (group as any).socialCohesionScore ?? 0;
+
+      report += `\nGrupo ${i + 1} (Tema: ${group.themeId})\n`;
+      report += `  Alunos: ${group.students.length}\n`;
+      report += `  Coesão Social: ${socialScore.toFixed(4)}\n`;
+
+      if (socialScore > 0) {
+        report += `  Status: ✅ Afinidades positivas\n`;
+      } else if (socialScore < 0) {
+        report += `  Status: ⚠️  Afinidades negativas\n`;
+      } else {
+        report += `  Status: ➖ Neutro\n`;
+      }
+
+      report += `  Integrantes:\n`;
+      for (const student of group.students) {
+        report += `    - ${student.name} (${student.course}, Fase ${student.phase})\n`;
       }
     }
 
