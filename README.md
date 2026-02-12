@@ -13,6 +13,11 @@ Sistema web completo para distribuição automática de grupos (4 alunos) em ati
 2. **[APLICAR_MIGRACAO_PYTHON.md](./APLICAR_MIGRACAO_PYTHON.md)** - Como aplicar migrações SQL
 3. **[EXECUTAR_MIGRACAO.md](./EXECUTAR_MIGRACAO.md)** - Alternativa: executar manualmente no Dashboard
 
+### 📊 Status e Progresso
+- **[FASE_6_STATUS.md](./FASE_6_STATUS.md)** - Status detalhado dos testes (Fase 6 em progresso)
+- **[TESTING.md](./TESTING.md)** - Guia completo de testes
+- **[STATUS.md](./STATUS.md)** - Status geral do projeto
+
 ### 🔧 Scripts
 - **[apply_migrations.py](./apply_migrations.py)** - Script Python para aplicar migrações
 - **[migrate.sh](./migrate.sh)** - Script Bash (Linux/Mac)

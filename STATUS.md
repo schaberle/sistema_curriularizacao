@@ -10,7 +10,7 @@ Sistema Web para Distribuição Automática de Grupos
 └── Algoritmo de Otimização: 3 Fases ✅
 ```
 
-**Status Geral**: 🟡 **50% COMPLETO**
+**Status Geral**: 🟠 **85% COMPLETO** (6 de 7 fases implementadas)
 
 ---
 
@@ -102,15 +102,38 @@ Sistema Web para Distribuição Automática de Grupos
   - FAQ e troubleshooting
   - Guia de parâmetros
 
+### Fase 4: Backend Routes
+- ✅ **AuthService.ts** (~200 linhas) - Autenticação JWT
+- ✅ **DatabaseService.ts** (~600 linhas) - CRUD com Supabase
+- ✅ **auth.routes.ts** - POST /api/auth/login, GET /api/auth/verify
+- ✅ **student.routes.ts** - POST/PUT/GET para alunos
+- ✅ **organizer.routes.ts** - Criação, upload, execução, resultados
+- ✅ **public.routes.ts** - Busca pública, listagem de temas
+- ✅ **Middleware** - Validação, autenticação, tratamento de erros
+
+### Fase 5: Frontend React
+- ✅ **HomePage.tsx** - Landing page com opções
+- ✅ **LoginPage.tsx** - Autenticação de organizador
+- ✅ **StudentFormPage.tsx** - Coleta de dados do aluno
+- ✅ **StudentPreferencesPage.tsx** - Rankear temas (drag-drop)
+- ✅ **StudentResultPage.tsx** - Busca de resultado
+- ✅ **OrganizerDashboard.tsx** - Painel de controle
+- ✅ **API Services** - Client HTTP com Axios
+- ✅ **Hooks & Context** - Autenticação global
+
 ---
 
 ## 🚀 Em Progresso
 
-### Fase 4: Backend Routes (PRÓXIMA)
-- ⏳ Implementar rotas de autenticação (POST /api/auth/login)
-- ⏳ Implementar rotas de aluno (POST /api/students, PUT /api/students/:id/preferences)
-- ⏳ Implementar rotas de organizador (POST /api/distributions/create, GET /api/distributions/:id)
-- ⏳ Implementar rotas públicas (GET /api/search?name=)
+### Fase 6: Testes e Integração E2E
+- ✅ Configurar Jest + ts-jest
+- ✅ Validação Middleware (18 testes, 80% cobertura)
+- ⏳ Testes de Domain Models
+- ⏳ Testes de Serviços
+- ⏳ Testes de Rotas
+- ⏳ Testes Frontend
+- ⏳ Testes E2E (Cypress)
+- ⏳ Deploy (Vercel, Render/Railway)
 
 ---
 
