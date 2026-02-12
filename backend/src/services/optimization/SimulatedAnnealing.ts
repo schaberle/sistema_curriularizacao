@@ -1,32 +1,40 @@
-import { Student, Group, Solution } from '../../domain';
+import { Student, Group, Solution, Theme } from '../../domain';
 import { ConstraintValidator } from './ConstraintValidator';
-import { PreferenceScorer } from './PreferenceScorer';
+import { EnergyCalculator } from './EnergyCalculator';
 
 /**
  * SimulatedAnnealing - Otimização global com aceitação probabilística
  *
- * Permite aceitar soluções piores temporariamente para escapar de ótimos locais.
+ * **REFATORADO para usar modelo de ENERGIA (não score)**
+ *
+ * Permite aceitar soluções piores (energia maior) temporariamente para escapar de ótimos locais.
  * Temperatura diminui ao longo do tempo, reduzindo probabilidade de aceitação.
  *
+ * Critério de Metropolis:
+ * - Se delta < 0 (melhorou): aceita sempre
+ * - Se delta >= 0 (piorou): aceita com probabilidade exp(-delta / T)
+ *
  * Parâmetros:
- * - initialTemperature: temperatura inicial (alta = mais exploração)
- * - coolingRate: quão rápido a temperatura cai (0-1)
- * - maxIterations: limite de iterações
+ * - initialTemperature: temperatura inicial (padrão: 0.8)
+ * - coolingRate: quão rápido a temperatura cai (padrão: 0.9995)
+ * - maxIterations: limite de iterações (padrão: 20000)
  */
 export class SimulatedAnnealing {
   private validator: ConstraintValidator;
-  private scorer: PreferenceScorer;
-  private initialTemperature: number = 1000;
-  private coolingRate: number = 0.95;
-  private maxIterations: number = 1000;
+  private energyCalculator: EnergyCalculator;
+  private initialTemperature: number = 0.8;
+  private coolingRate: number = 0.9995;
+  private maxIterations: number = 20000;
+  private themes: Theme[] = [];
 
   constructor(
+    energyCalculator?: EnergyCalculator,
     initialTemp?: number,
     coolingRate?: number,
     maxIterations?: number
   ) {
     this.validator = new ConstraintValidator();
-    this.scorer = new PreferenceScorer();
+    this.energyCalculator = energyCalculator || new EnergyCalculator();
 
     if (initialTemp) this.initialTemperature = initialTemp;
     if (coolingRate) this.coolingRate = coolingRate;
@@ -34,34 +42,45 @@ export class SimulatedAnnealing {
   }
 
   /**
-   * Executa Simulated Annealing
+   * Executa Simulated Annealing com modelo de ENERGIA
+   *
+   * @param solution Solução inicial
+   * @param themes Temas disponíveis (necessários para cálculo de energia)
+   * @returns Melhor solução encontrada
    */
-  optimize(solution: Solution): Solution {
+  public optimize(solution: Solution, themes: Theme[]): Solution {
+    this.themes = themes;
+
     let currentSolution = solution;
     let bestSolution = solution;
-    let currentScore = this.scorer.calculateSolutionScore(currentSolution);
-    let bestScore = currentScore;
+    let currentEnergy = this.calculateSolutionEnergy(currentSolution);
+    let bestEnergy = currentEnergy;
     let temperature = this.initialTemperature;
     let iteration = 0;
 
-    while (iteration < this.maxIterations && temperature > 1) {
+    console.log(`[SimulatedAnnealing] Iniciando com energia: ${currentEnergy.toFixed(2)}`);
+
+    while (iteration < this.maxIterations && temperature > 1e-6) {
       // Gerar vizinho aleatório
       const neighbor = this.generateNeighbor(currentSolution);
 
       if (neighbor) {
-        const neighborScore = this.scorer.calculateSolutionScore(neighbor);
-        const delta = neighborScore - currentScore;
+        const neighborEnergy = this.calculateSolutionEnergy(neighbor);
+        const delta = neighborEnergy - currentEnergy;
 
-        // Critério de aceitação
-        if (delta > 0 || Math.random() < Math.exp(delta / temperature)) {
+        // Critério de Metropolis para MINIMIZAÇÃO de energia:
+        // - Se delta < 0: aceita (melhoria)
+        // - Se delta >= 0: aceita com probabilidade exp(-delta / T)
+        if (delta < 0 || Math.random() < Math.exp(-delta / temperature)) {
           // Aceita vizinho
           currentSolution = neighbor;
-          currentScore = neighborScore;
+          currentEnergy = neighborEnergy;
 
           // Atualiza melhor solução encontrada
-          if (neighborScore > bestScore) {
+          if (neighborEnergy < bestEnergy) {
             bestSolution = neighbor;
-            bestScore = neighborScore;
+            bestEnergy = neighborEnergy;
+            console.log(`[SimulatedAnnealing] Iter ${iteration}: Nova melhor energia = ${bestEnergy.toFixed(2)}`);
           }
         }
       }
@@ -71,6 +90,8 @@ export class SimulatedAnnealing {
       iteration++;
     }
 
+    console.log(`[SimulatedAnnealing] Concluído. Melhor energia: ${bestEnergy.toFixed(2)}`);
+    bestSolution.totalEnergy = bestEnergy;
     return bestSolution;
   }
 
@@ -255,11 +276,34 @@ export class SimulatedAnnealing {
   }
 
   /**
+   * Calcula energia total de uma solução
+   */
+  private calculateSolutionEnergy(solution: Solution): number {
+    let totalEnergy = 0;
+
+    for (const group of solution.groups) {
+      const theme = this.themes.find(t => t.id === group.themeId);
+      if (!theme) {
+        return Infinity;
+      }
+
+      const energy = this.energyCalculator.calculateGroupEnergy(group, theme);
+      if (!Number.isFinite(energy)) {
+        return Infinity;
+      }
+
+      totalEnergy += energy;
+    }
+
+    return totalEnergy;
+  }
+
+  /**
    * Calcula probabilidade de aceitação de solução pior
    * Baseado na Lei de Boltzmann: P = exp(-delta/T)
    */
   private acceptanceProbability(delta: number, temperature: number): number {
-    if (delta >= 0) return 1.0; // Sempre aceita se melhorou
-    return Math.exp(delta / temperature);
+    if (delta <= 0) return 1.0; // Sempre aceita se melhorou
+    return Math.exp(-delta / temperature);
   }
 }

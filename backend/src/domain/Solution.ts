@@ -14,30 +14,44 @@ import { ConstraintViolation } from './types';
 export class Solution {
   groups: Group[];
   constraintViolations: ConstraintViolation[];
-  totalScore: number;
+  totalScore: number;                    // DEPRECATED: usar totalEnergy (modelo ideal)
+  totalEnergy: number;                   // Energia total (Fase 1 - modelo ideal)
+  socialScore: number;                   // Score social (Fase 2 - opcional)
   createdAt: Date;
-  iterationCount: number;  // Número de iterações do algoritmo
-  computeTimeMs: number;   // Tempo de computação em ms
+  iterationCount: number;                // Número de iterações do algoritmo
+  computeTimeMs: number;                 // Tempo de computação em ms
+  socialOptimizationApplied: boolean;    // Se Fase 2 foi aplicada
 
   /**
    * Constructor
    * @param groups Lista de grupos formados
    * @param constraints Violações de restrição (opcional)
-   * @param totalScore Score de satisfação (opcional)
+   * @param totalScore Score de satisfação (DEPRECATED, usar totalEnergy)
+   * @param iterationCount Número de iterações
+   * @param computeTimeMs Tempo em ms
+   * @param totalEnergy Energia total (Fase 1)
+   * @param socialScore Score social (Fase 2)
+   * @param socialOptimizationApplied Se Fase 2 foi aplicada
    */
   constructor(
     groups: Group[] = [],
     constraints: ConstraintViolation[] = [],
     totalScore: number = 0,
     iterationCount: number = 0,
-    computeTimeMs: number = 0
+    computeTimeMs: number = 0,
+    totalEnergy: number = 0,
+    socialScore: number = 0,
+    socialOptimizationApplied: boolean = false
   ) {
     this.groups = groups;
     this.constraintViolations = constraints;
     this.totalScore = totalScore;
+    this.totalEnergy = totalEnergy;
+    this.socialScore = socialScore;
     this.createdAt = new Date();
     this.iterationCount = iterationCount;
     this.computeTimeMs = computeTimeMs;
+    this.socialOptimizationApplied = socialOptimizationApplied;
   }
 
   /**
@@ -149,10 +163,24 @@ export class Solution {
   }
 
   /**
-   * Obtém score total de satisfação
+   * Obtém score total de satisfação (DEPRECATED, usar getTotalEnergy)
    */
   getTotalScore(): number {
     return this.totalScore;
+  }
+
+  /**
+   * Obtém energia total (Fase 1 - modelo ideal)
+   */
+  getTotalEnergy(): number {
+    return this.totalEnergy;
+  }
+
+  /**
+   * Obtém score social (Fase 2 - opcional)
+   */
+  getSocialScore(): number {
+    return this.socialScore;
   }
 
   /**
@@ -193,18 +221,37 @@ export class Solution {
    */
   getSummary() {
     return {
+      // Grupos e alunos
       groupCount: this.getGroupCount(),
       allocatedStudents: this.getAllocatedStudentCount(),
+
+      // Scores (modelo legado)
       totalScore: this.totalScore,
       averageScorePerStudent: this.getAverageScorePerStudent(),
+
+      // Energia (modelo ideal - Fase 1)
+      totalEnergy: this.totalEnergy,
+
+      // Social (Fase 2)
+      socialScore: this.socialScore,
+      socialOptimizationApplied: this.socialOptimizationApplied,
+
+      // Viabilidade
       isFeasible: this.isFeasible(),
       isOptimal: this.isOptimal(),
+
+      // Violações (modelo legado)
       criticalViolations: this.getCriticalViolationCount(),
       importantViolations: this.getImportantViolationCount(),
       desirableViolations: this.getDesirableViolationCount(),
+
+      // Distribuição
       groupsByTheme: this.getGroupCountByTheme(),
+
+      // Metadata
       iterationCount: this.iterationCount,
-      computeTimeMs: this.computeTimeMs
+      computeTimeMs: this.computeTimeMs,
+      createdAt: this.createdAt
     };
   }
 
@@ -212,12 +259,15 @@ export class Solution {
    * Obtém representação string
    */
   toString(): string {
+    const energyStr = this.totalEnergy !== 0 ? `, Energia: ${this.totalEnergy.toFixed(2)}` : '';
+    const socialStr = this.socialScore !== 0 ? `, Social: ${this.socialScore.toFixed(2)}` : '';
+
     return (
       `Solution: ${this.getGroupCount()} grupos, ` +
-      `${this.getAllocatedStudentCount()} alunos, ` +
-      `Score: ${this.totalScore.toFixed(2)}, ` +
-      `Viável: ${this.isFeasible() ? 'SIM' : 'NÃO'}, ` +
-      `Violações: ${this.getViolationCount()}`
+      `${this.getAllocatedStudentCount()} alunos` +
+      energyStr +
+      socialStr +
+      `, Viável: ${this.isFeasible() ? 'SIM' : 'NÃO'}`
     );
   }
 
@@ -230,6 +280,9 @@ export class Solution {
       groups: this.groups.map(g => g.toJSON()),
       constraintViolations: this.constraintViolations,
       totalScore: this.totalScore,
+      totalEnergy: this.totalEnergy,
+      socialScore: this.socialScore,
+      socialOptimizationApplied: this.socialOptimizationApplied,
       summary: this.getSummary(),
       createdAt: this.createdAt,
       iterationCount: this.iterationCount,

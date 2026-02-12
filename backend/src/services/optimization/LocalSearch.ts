@@ -1,45 +1,61 @@
-import { Student, Group, Solution } from '../../domain';
+import { Student, Group, Solution, Theme } from '../../domain';
 import { ConstraintValidator } from './ConstraintValidator';
-import { PreferenceScorer } from './PreferenceScorer';
+import { EnergyCalculator } from './EnergyCalculator';
 
 /**
  * LocalSearch - Refina uma solução através de buscas locais
  *
- * Estratégias:
+ * **REFATORADO para usar modelo de ENERGIA (não score)**
+ *
+ * Estratégia:
  * 1. 2-opt: Troca 2 alunos entre grupos diferentes
- * 2. 3-opt: Troca 3 alunos (mais complexo, melhor qualidade)
- * 3. Melhor movimento primeiro (best-fit)
+ * 2. Aceita troca se reduz ENERGIA (delta < 0)
+ * 3. Continua até convergência (nenhuma troca melhora)
+ *
+ * Diferença do legado:
+ * - Usa EnergyCalculator em vez de PreferenceScorer
+ * - MINIMIZA energia (delta < 0), não MAXIMIZA score (delta > 0)
+ * - Máscara dura: rejeita imediatamente se energia = Infinity
  */
 export class LocalSearch {
   private validator: ConstraintValidator;
-  private scorer: PreferenceScorer;
+  private energyCalculator: EnergyCalculator;
   private maxIterationsWithoutImprovement: number = 100;
+  private themes: Theme[] = [];
 
-  constructor() {
+  constructor(energyCalculator?: EnergyCalculator) {
     this.validator = new ConstraintValidator();
-    this.scorer = new PreferenceScorer();
+    this.energyCalculator = energyCalculator || new EnergyCalculator();
   }
 
   /**
    * Executa busca local 2-opt até convergência
    * Tenta trocar pares de alunos entre grupos
+   *
+   * @param solution Solução a refinar
+   * @param themes Temas disponíveis (necessários para recalcular energia)
+   * @returns Solução refinada
    */
-  optimize(solution: Solution): Solution {
+  public optimize(solution: Solution, themes: Theme[]): Solution {
+    this.themes = themes;
     let currentSolution = solution;
     let iterationsWithoutImprovement = 0;
-    let currentScore = this.scorer.calculateSolutionScore(currentSolution);
+    let currentEnergy = this.calculateSolutionEnergy(currentSolution);
+
+    console.log(`[LocalSearch] Energia inicial: ${currentEnergy.toFixed(2)}`);
 
     while (iterationsWithoutImprovement < this.maxIterationsWithoutImprovement) {
       const improved = this.perform2Opt(currentSolution);
 
       if (improved) {
-        const newScore = this.scorer.calculateSolutionScore(improved);
+        const newEnergy = this.calculateSolutionEnergy(improved);
 
-        // Se melhorou, aceita e reseta contador
-        if (newScore > currentScore) {
+        // Se REDUZIU energia, aceita e reseta contador
+        if (newEnergy < currentEnergy) {
           currentSolution = improved;
-          currentScore = newScore;
+          currentEnergy = newEnergy;
           iterationsWithoutImprovement = 0;
+          console.log(`[LocalSearch] Melhoria encontrada. Energia: ${newEnergy.toFixed(2)}`);
         } else {
           iterationsWithoutImprovement++;
         }
@@ -49,6 +65,8 @@ export class LocalSearch {
       }
     }
 
+    console.log(`[LocalSearch] Energia final: ${currentEnergy.toFixed(2)}`);
+    currentSolution.totalEnergy = currentEnergy;
     return currentSolution;
   }
 
@@ -68,15 +86,15 @@ export class LocalSearch {
         // Tenta trocar cada aluno de A com cada aluno de B
         for (const studentA of groupA.students) {
           for (const studentB of groupB.students) {
-            const delta = this.calculateSwapDelta(
+            const energyDelta = this.calculateSwapDelta(
               studentA,
               studentB,
               groupA,
               groupB
             );
 
-            // Se a troca melhora o score, faz a troca
-            if (delta > 0) {
+            // Se a troca REDUZ energia (delta < 0), faz a troca
+            if (energyDelta < 0) {
               return this.performSwap(solution, studentA, studentB, groupA, groupB);
             }
           }
@@ -89,7 +107,9 @@ export class LocalSearch {
   }
 
   /**
-   * Calcula delta de score ao trocar dois alunos
+   * Calcula delta de energia ao trocar dois alunos
+   *
+   * IMPORTANTE: delta < 0 significa MELHORIA (redução de energia)
    */
   private calculateSwapDelta(
     studentA: Student,
@@ -97,27 +117,53 @@ export class LocalSearch {
     groupA: Group,
     groupB: Group
   ): number {
-    // Score que A perde ao sair de A e ganha ao entrar em B
-    const scoreChangeA = studentA.getThemeScore(groupB.themeId) -
-                         studentA.getThemeScore(groupA.themeId);
-
-    // Score que B perde ao sair de B e ganha ao entrar em A
-    const scoreChangeB = studentB.getThemeScore(groupA.themeId) -
-                         studentB.getThemeScore(groupB.themeId);
-
-    // Mudança total de score (ignorando penalidades por agora)
-    const scoreDelta = scoreChangeA + scoreChangeB;
-
     // Verificar se troca mantém viabilidade
     if (!this.canPerformSwap(studentA, studentB, groupA, groupB)) {
-      return -1000; // Penalidade grande por violação de restrição
+      return Infinity; // Troca violaria restrições
     }
 
-    return scoreDelta;
+    // Calcular energia ANTES do swap
+    const themeA = this.themes.find(t => t.id === groupA.themeId);
+    const themeB = this.themes.find(t => t.id === groupB.themeId);
+
+    if (!themeA || !themeB) {
+      return Infinity; // Temas não encontrados
+    }
+
+    const energyBefore = this.energyCalculator.calculateGroupEnergy(groupA, themeA) +
+                         this.energyCalculator.calculateGroupEnergy(groupB, themeB);
+
+    // Criar cópias pós-swap
+    const newGroupA = new Group(
+      groupA.id,
+      groupA.themeId,
+      groupA.distributionId,
+      groupA.students.filter(s => s.id !== studentA.id).concat([studentB])
+    );
+
+    const newGroupB = new Group(
+      groupB.id,
+      groupB.themeId,
+      groupB.distributionId,
+      groupB.students.filter(s => s.id !== studentB.id).concat([studentA])
+    );
+
+    // Calcular energia DEPOIS do swap (pode precisar recalcular temas ótimos)
+    let energyAfter = this.energyCalculator.calculateGroupEnergy(newGroupA, themeA) +
+                      this.energyCalculator.calculateGroupEnergy(newGroupB, themeB);
+
+    // Se algum grupo ficou inviável (energia infinita), rejeita
+    if (!Number.isFinite(energyAfter)) {
+      return Infinity;
+    }
+
+    // Delta = energyAfter - energyBefore
+    // Delta < 0 significa melhoria
+    return energyAfter - energyBefore;
   }
 
   /**
-   * Verifica se a troca é válida mantendo restrições críticas
+   * Verifica se a troca é válida mantendo restrições críticas (máscara dura)
    */
   private canPerformSwap(
     studentA: Student,
@@ -141,12 +187,87 @@ export class LocalSearch {
     );
 
     // Ambos os grupos devem satisfazer restrições críticas
-    const violationsA = this.validator.validateGroup(tempGroupA)
-      .filter(v => v.severity === 'CRITICAL');
-    const violationsB = this.validator.validateGroup(tempGroupB)
-      .filter(v => v.severity === 'CRITICAL');
+    // Verificar manualmente (EE count, phase diversity)
+    const isGroupAValid = this.isGroupFeasible(tempGroupA);
+    const isGroupBValid = this.isGroupFeasible(tempGroupB);
 
-    return violationsA.length === 0 && violationsB.length === 0;
+    return isGroupAValid && isGroupBValid;
+  }
+
+  /**
+   * Verifica viabilidade de um grupo (restrições duras)
+   */
+  private isGroupFeasible(group: Group): boolean {
+    if (group.students.length !== 4) return false;
+
+    const electricalCount = group.students.filter(s => s.course === 'EE').length;
+    if (electricalCount < 1 || electricalCount > 2) return false;
+
+    const uniquePhases = new Set(group.students.map(s => s.phase)).size;
+    if (uniquePhases < 2) return false;
+
+    return true;
+  }
+
+  /**
+   * Executa a troca de dois alunos entre grupos
+   */
+  private performSwap(
+    solution: Solution,
+    studentA: Student,
+    studentB: Student,
+    groupA: Group,
+    groupB: Group
+  ): Solution {
+    // Criar novos grupos após troca
+    const newGroupA = new Group(
+      groupA.id,
+      groupA.themeId,
+      groupA.distributionId,
+      groupA.students.filter(s => s.id !== studentA.id).concat([studentB])
+    );
+
+    const newGroupB = new Group(
+      groupB.id,
+      groupB.themeId,
+      groupB.distributionId,
+      groupB.students.filter(s => s.id !== studentB.id).concat([studentA])
+    );
+
+    // Substituir grupos na solução
+    const newGroups = solution.groups.map(g => {
+      if (g.id === groupA.id) return newGroupA;
+      if (g.id === groupB.id) return newGroupB;
+      return g;
+    });
+
+    // Criar nova solução
+    const newSolution = new Solution(newGroups, [], 0);
+    return newSolution;
+  }
+
+  /**
+   * Calcula energia total de uma solução
+   */
+  private calculateSolutionEnergy(solution: Solution): number {
+    let totalEnergy = 0;
+
+    for (const group of solution.groups) {
+      const theme = this.themes.find(t => t.id === group.themeId);
+      if (!theme) {
+        return Infinity;
+      }
+
+      const energy = this.energyCalculator.calculateGroupEnergy(group, theme);
+      if (!Number.isFinite(energy)) {
+        return Infinity;
+      }
+
+      totalEnergy += energy;
+    }
+
+    return totalEnergy;
+  }
   }
 
   /**
