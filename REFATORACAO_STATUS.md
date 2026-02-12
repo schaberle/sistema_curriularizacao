@@ -46,6 +46,8 @@
     - **DEPOIS**: Retorna Infinity se grupo fica inviável
   - ✅ Método `optimize(solution, themes)` agora recebe temas necessários
   - ✅ Métodos `calculateSwapDelta()` e `performSwap()` refatorados
+  - ✅ Código antigo/duplicado removido
+  - ✅ Método `setWeights()` adicionado
 
 ### 2.2 SimulatedAnnealing.ts (REFATORADO)
 - **Status**: ✅ REFATORADO
@@ -61,22 +63,58 @@
     - `maxIterations`: 20000 (era 1000)
   - ✅ Método `optimize(solution, themes)` agora recebe temas
   - ✅ Método `calculateSolutionEnergy()` adicionado
+  - ✅ Método `setWeights()` adicionado
 
 ---
 
-## ⏳ PRÓXIMOS PASSOS - Semana 3+
+## ✅ CONCLUÍDO - Semana 3: Gerador e Motor de Distribuição
 
-### 3.1 SolutionGenerator.ts (FALTA REFATORAR)
-- [ ] Substituir `PreferenceScorer` por `EnergyCalculator`
-- [ ] Usar `findBestThemeForGroup()` para atribuição de temas
-- [ ] Construção gulosa baseada em minimizar energia
-- [ ] Método `generateInitialSolution(students, themes)` atualizado
+### 3.1 SolutionGenerator.ts (REFATORADO)
+- **Status**: ✅ REFATORADO
+- **Mudanças principais**:
+  - ❌ Removido: `ConstraintValidator` (paradigma antigo)
+  - ✅ Adicionado: `EnergyCalculator` (modelo de energia)
+  - ✅ Constructor aceita pesos configuráveis: `{ wPref?, wDup?, wDiv? }`
+  - ✅ Método `generateInitialSolution()` usa construção gulosa por energia
+  - ✅ Usa `createTestGroup()` para avaliar colocações antes de confirmar
+  - ✅ Cálculo de energia total na solução inicial
+  - ✅ Métodos `setWeights()` e `getWeights()` adicionados
+  - ✅ Alocação em duas fases: preferida (energia) + fallback (último recurso)
+  - ✅ Testes unitários criados (SolutionGenerator.test.ts)
 
-### 3.2 DistributionEngine.ts (FALTA ATUALIZAR)
-- [ ] Instanciar `EnergyCalculator` com pesos configuráveis
-- [ ] Passar `themes` aos métodos de LocalSearch e SA
-- [ ] Novos métodos: `solvePhase1()` e `solvePhase2()`
-- [ ] Atualizar assinatura de `solve()`
+### 3.2 DistributionEngine.ts (REFATORADO)
+- **Status**: ✅ REFATORADO
+- **Mudanças principais**:
+  - ❌ Removido: `PreferenceScorer`, `SocialScorer`, `SocialOptimizer`
+  - ✅ Adicionado: `EnergyCalculator` principal
+  - ✅ Constructor aceita pesos: `{ wPref?, wDup?, wDiv? }`
+  - ✅ Novo método: `solvePhase1(students, themes)` executa 3 sub-fases:
+    - 1.1 Geração inicial (SolutionGenerator com energia)
+    - 1.2 Refinamento local (LocalSearch 2-opt)
+    - 1.3 Otimização global (SimulatedAnnealing)
+  - ✅ Método `solve()` agora alias para `solvePhase1()` (backward compatible)
+  - ✅ Relatório `generatePhase1Report()` mostra energia (não score)
+  - ✅ Passa `themes` aos otimizadores (necessário para recalcular energia)
+  - ✅ Métodos `setWeights()` e `getWeights()` para configuração dinâmica
+  - ✅ Método `validateScenario()` mantido para viabilidade pré-distribuição
+
+---
+
+## ⏳ PRÓXIMOS PASSOS - Semana 4+
+
+### 4.1 Database Migrations (FALTA IMPLEMENTAR)
+- [ ] Adicionar colunas à tabela `distributions`:
+  - `w_pref` (peso de preferências, default 1.0)
+  - `w_dup` (peso de duplicatas, default 0.9)
+  - `w_div` (peso de diversidade, default 0.35)
+  - `status` (PENDING, READY, PHASE1_COMPLETED, PHASE2_COMPLETED)
+- [ ] Criar tabela `student_affinities` para Fase 2
+
+### 4.2 Fase 2 - Otimização Social (FALTA IMPLEMENTAR)
+- [ ] Implementar `Affinity.ts` e `AffinityMatrix.ts`
+- [ ] Implementar `SocialOptimizer.ts` completo
+- [ ] Endpoints para declaração de afinidades
+- [ ] Endpoints para execução de Fase 2
 
 ### 3.3 Banco de Dados (FALTA IMPLEMENTAR)
 - [ ] Migração: adicionar w_pref, w_dup, w_div, status à tabela distributions
@@ -137,15 +175,21 @@
 ## 📁 Arquivos Modificados
 
 ```
-✅ backend/src/services/optimization/EnergyCalculator.ts (NOVO)
-✅ backend/src/services/optimization/EnergyCalculator.test.ts (NOVO)
-✅ backend/src/domain/Solution.ts (ATUALIZADO)
-✅ backend/src/services/optimization/LocalSearch.ts (REFATORADO)
-✅ backend/src/services/optimization/SimulatedAnnealing.ts (REFATORADO)
+✅ Semana 1-2: Base Matemática + Algoritmos
+  ✅ backend/src/services/optimization/EnergyCalculator.ts (NOVO)
+  ✅ backend/src/services/optimization/EnergyCalculator.test.ts (NOVO)
+  ✅ backend/src/domain/Solution.ts (ATUALIZADO)
+  ✅ backend/src/services/optimization/LocalSearch.ts (REFATORADO)
+  ✅ backend/src/services/optimization/SimulatedAnnealing.ts (REFATORADO)
 
-⏳ backend/src/services/optimization/SolutionGenerator.ts (FALTA)
-⏳ backend/src/services/optimization/DistributionEngine.ts (FALTA)
-⏳ backend/src/domain/Affinity.ts (FALTA)
-⏳ backend/src/domain/AffinityMatrix.ts (FALTA)
-⏳ backend/src/services/optimization/SocialOptimizer.ts (FALTA COMPLETAR)
+✅ Semana 3: Gerador e Motor
+  ✅ backend/src/services/optimization/SolutionGenerator.ts (REFATORADO)
+  ✅ backend/src/services/optimization/SolutionGenerator.test.ts (NOVO)
+  ✅ backend/src/services/optimization/DistributionEngine.ts (REFATORADO)
+
+⏳ Semana 4+: Fase 2 Social
+  ⏳ backend/src/domain/Affinity.ts (FALTA)
+  ⏳ backend/src/domain/AffinityMatrix.ts (FALTA)
+  ⏳ backend/src/services/optimization/SocialOptimizer.ts (FALTA COMPLETAR)
+  ⏳ supabase/migrations/003_social_optimization.sql (FALTA)
 ```
