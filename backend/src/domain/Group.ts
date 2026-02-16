@@ -14,7 +14,7 @@ export class Group {
   id: string;
   themeId: string;
   distributionId: string;
-  students: Student[];  // Máximo 4 alunos
+  students: Student[];  // Normalmente 4 alunos (3-5 permitido para sobras)
   createdAt: Date;
   updatedAt: Date;
 
@@ -42,8 +42,8 @@ export class Group {
     if (!distributionId || distributionId.trim() === '') {
       throw new Error('ID da distribuição não pode estar vazio');
     }
-    if (students.length > GROUP_SIZE) {
-      throw new Error(`Grupo não pode ter mais de ${GROUP_SIZE} alunos`);
+    if (students.length > GROUP_SIZE + 1) {
+      throw new Error(`Grupo não pode ter mais de ${GROUP_SIZE + 1} alunos`);
     }
 
     this.id = id;
@@ -58,8 +58,8 @@ export class Group {
    * Adiciona um aluno ao grupo
    */
   addStudent(student: Student): void {
-    if (this.isFull()) {
-      throw new Error(`Grupo ${this.id} já está cheio (${GROUP_SIZE} alunos)`);
+    if (this.students.length >= GROUP_SIZE + 1) {
+      throw new Error(`Grupo ${this.id} já está cheio (${GROUP_SIZE + 1} alunos)`);
     }
     if (this.hasStudent(student.id)) {
       throw new Error(`Aluno ${student.id} já está no grupo`);
@@ -100,10 +100,10 @@ export class Group {
   }
 
   /**
-   * Verifica se grupo está cheio
+   * Verifica se grupo está cheio (atingiu tamanho padrão)
    */
   isFull(): boolean {
-    return this.students.length === GROUP_SIZE;
+    return this.students.length >= GROUP_SIZE;
   }
 
   /**

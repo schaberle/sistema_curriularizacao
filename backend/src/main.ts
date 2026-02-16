@@ -8,6 +8,7 @@ import { createAuthRoutes } from './routes/auth.routes';
 import { createStudentRoutes } from './routes/student.routes';
 import { createOrganizerRoutes } from './routes/organizer.routes';
 import { createPublicRoutes } from './routes/public.routes';
+import { createThemeRoutes } from './routes/theme.routes';
 import { notFoundHandler, errorHandler } from './middleware/error.middleware';
 
 // Carregar variáveis de ambiente
@@ -22,13 +23,19 @@ async function initializeApp(): Promise<Application> {
   // ============================================================
   // VARIÁVEIS DE AMBIENTE
   // ============================================================
-  const supabaseUrl = process.env.SUPABASE_URL || '';
-  const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
+  const supabaseUrl = (process.env.SUPABASE_URL || '').trim();
+  // Use Service Key to bypass RLS on backend if provided and not a placeholder
+  const serviceKey = (process.env.SUPABASE_SERVICE_KEY || '').trim();
+  const anonKey = (process.env.SUPABASE_ANON_KEY || '').trim();
+
+  const supabaseKey = (serviceKey && serviceKey !== 'your_service_role_key_here')
+    ? serviceKey
+    : anonKey;
   const jwtSecret = process.env.JWT_SECRET || 'seu-secret-aqui';
   const port = process.env.PORT || 3001;
 
   if (!supabaseUrl || !supabaseKey) {
-    throw new Error('SUPABASE_URL e SUPABASE_ANON_KEY são obrigatórios');
+    throw new Error('SUPABASE_URL e SUPABASE_KEY são obrigatórios');
   }
 
   // ============================================================
@@ -36,9 +43,31 @@ async function initializeApp(): Promise<Application> {
   // ============================================================
 
   // CORS
+  const allowedOrigins = [
+    process.env.CORS_ORIGIN || 'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:3000'
+  ];
+
   app.use(
     cors({
-      origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+      origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
+          callback(null, true);
+        } else {
+          // Temporarily allow all for debugging if needed, but for now stick to list
+          // console.warn('Blocked by CORS:', origin);
+          // return callback(new Error('Not allowed by CORS'));
+          // For development ease, let's essentially allow all localhost
+          if (origin.startsWith('http://localhost')) {
+            return callback(null, true);
+          }
+          callback(new Error('Not allowed by CORS'));
+        }
+      },
       credentials: true,
     })
   );
@@ -52,7 +81,7 @@ async function initializeApp(): Promise<Application> {
   // ============================================================
 
   const database = new DatabaseService(supabaseUrl, supabaseKey);
-  const authService = new AuthService(database, jwtSecret);
+  const authService = new AuthService(database, supabaseUrl, supabaseKey);
 
   // Verificar conexão com banco de dados
   console.log('Verificando conexão com Supabase...');
@@ -76,15 +105,17 @@ async function initializeApp(): Promise<Application> {
     });
   });
 
+  // Themes route FIRST (to see if it hits)
+  app.use('/api/themes', createThemeRoutes(database));
+
   // Auth routes (sem autenticação)
   app.use('/api/auth', createAuthRoutes(authService));
 
   // Student routes (sem autenticação, apenas para registro)
   app.use('/api/students', createStudentRoutes(database));
 
-  // Public routes (busca de resultados, sem autenticação)
+  // Public/Search routes (sem autenticação)
   app.use('/api/search', createPublicRoutes(database));
-  app.use('/api/themes', createPublicRoutes(database));
 
   // Organizer routes (requer autenticação)
   app.use('/api/organizer', createOrganizerRoutes(database, authService));

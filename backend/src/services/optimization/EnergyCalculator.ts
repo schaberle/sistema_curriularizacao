@@ -1,4 +1,5 @@
 import { Group, Theme, Student } from '../../domain';
+import { ConstraintRules } from './SystemViabilityAnalyzer';
 
 /**
  * EnergyCalculator - Cálculo de Energia (Modelo Ideal - Fase 1)
@@ -23,6 +24,14 @@ export class EnergyCalculator {
   // Tabela de conversão de ranking para score bruto
   private readonly SCORE_TABLE = [100, 70, 50, 35, 25, 18, 12, 8];
 
+  // Restrições dinâmicas (pode ser adaptado por AdaptiveConstraintManager)
+  private rules: ConstraintRules = {
+    minElectricalEngineers: 1,
+    maxElectricalEngineers: 2,
+    minPhaseDiversity: 2,
+    groupSize: 4
+  };
+
   /**
    * Constructor
    * @param config Configuração de pesos (opcionais, com defaults)
@@ -36,6 +45,13 @@ export class EnergyCalculator {
     if (this.wPref < 0 || this.wDup < 0 || this.wDiv < 0) {
       throw new Error('Pesos não podem ser negativos');
     }
+  }
+
+  /**
+   * Define restrições dinâmicas (chamado por AdaptiveConstraintManager)
+   */
+  public setConstraintRules(rules: ConstraintRules): void {
+    this.rules = rules;
   }
 
   /**
@@ -165,26 +181,32 @@ export class EnergyCalculator {
   /**
    * Verifica viabilidade de um grupo (restrições duras)
    *
-   * Restrições:
-   * 1. Exatamente 4 alunos
-   * 2. 1 a 2 alunos de Engenharia Elétrica (EE)
-   * 3. Mínimo 2 fases distintas
+   * Usa ConstraintRules dinâmicas (podem ser adaptadas por AdaptiveConstraintManager)
    */
-  private isGroupFeasible(group: Group): boolean {
-    // Restrição 1: tamanho
-    if (group.students.length !== 4) {
+  public isGroupFeasible(group: Group): boolean {
+    // Restrição 1: tamanho (permite ±1 para grupos de sobra)
+    const size = group.students.length;
+    const minSize = this.rules.groupSize - 1; // ex: 3 para groupSize=4
+    const maxSize = this.rules.groupSize + 1; // ex: 5 para groupSize=4
+    if (size < minSize || size > maxSize) {
       return false;
     }
 
-    // Restrição 2: contagem de elétricos
+    // Restrição 2: contagem de elétricos (dinâmica)
+    // Para grupos menores/maiores, ajustar proporcionalmente
     const electricalCount = group.students.filter(s => s.course === 'EE').length;
-    if (electricalCount < 1 || electricalCount > 2) {
+    const minEE = this.rules.minElectricalEngineers;
+    const maxEE = size >= this.rules.groupSize
+      ? this.rules.maxElectricalEngineers
+      : Math.min(this.rules.maxElectricalEngineers, size - 1); // garantir pelo menos 1 não-EE
+
+    if (electricalCount < minEE || electricalCount > maxEE) {
       return false;
     }
 
-    // Restrição 3: diversidade de fases
+    // Restrição 3: diversidade de fases (dinâmica)
     const uniquePhases = new Set(group.students.map(s => s.phase)).size;
-    if (uniquePhases < 2) {
+    if (uniquePhases < this.rules.minPhaseDiversity) {
       return false;
     }
 

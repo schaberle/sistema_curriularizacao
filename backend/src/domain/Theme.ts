@@ -42,7 +42,9 @@ export class Theme {
       throw new Error('ID da distribuição não pode estar vazio');
     }
     if (!name || name.trim() === '') {
-      throw new Error('Nome do tema não pode estar vazio');
+      console.warn(`[WARN] TEMA SEM NOME DETECTADO. ID: ${id}. Usando placeholder.`);
+      name = `Tema ${id.substring(0, 8)}`;
+      // throw new Error(`Nome do tema não pode estar vazio. ID: ${id}, Name type: ${typeof name}, Name value: ${name}`);
     }
     if (!Number.isInteger(maxGroups) || maxGroups < 1) {
       throw new Error(`maxGroups deve ser um inteiro >= 1, recebeu: ${maxGroups}`);

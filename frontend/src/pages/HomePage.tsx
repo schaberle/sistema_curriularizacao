@@ -1,103 +1,132 @@
-import { useNavigate } from 'react-router-dom';
+﻿import { useNavigate } from 'react-router-dom';
+import {
+  ArrowRight,
+  BarChart3,
+  BrainCircuit,
+  GraduationCap,
+  LayoutDashboard,
+  ShieldCheck,
+  Users,
+} from 'lucide-react';
 
 /**
- * HomePage - Página inicial com opções para alunos e organizadores
+ * HomePage - Pagina inicial
  */
 export function HomePage() {
   const navigate = useNavigate();
 
+  const handleStudentAccess = () => {
+    const distributionId = prompt('ID da Distribuicao:');
+    if (distributionId) {
+      navigate(`/student/form/${distributionId}`);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-600 to-purple-600 py-12 px-4">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-16">
-          <h1 className="text-5xl font-bold text-white mb-4">
-            🎓 Sistema de Distribuição de Grupos
-          </h1>
-          <p className="text-xl text-blue-100">
-            Distribuição inteligente de grupos para atividades interdisciplinares
-          </p>
-        </div>
-
-        {/* Cards */}
-        <div className="grid md:grid-cols-2 gap-8 mb-12">
-          {/* Card Alunos */}
-          <div className="bg-white rounded-lg shadow-2xl p-8 hover:shadow-3xl transition transform hover:scale-105">
-            <div className="text-5xl mb-4">👨‍🎓</div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Para Alunos</h2>
-            <p className="text-gray-600 mb-6">
-              Preencha suas informações e rankear temas de preferência para ser distribuído em um grupo.
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,#eaf1ff_0%,#f8fafc_45%,#f8fafc_100%)]">
+      <section className="border-b border-slate-200/70 bg-white/80 backdrop-blur">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-3xl text-center animate-fade-in">
+            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-[var(--brand-100)]">
+              <GraduationCap className="h-8 w-8 text-[var(--brand-700)]" />
+            </div>
+            <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl">
+              Sistema de Distribuicao de Grupos
+            </h1>
+            <p className="mt-5 text-lg text-slate-600">
+              Plataforma para formar grupos com equilibrio academico e preferencias dos alunos, em um fluxo simples para organizadores.
             </p>
-            <div className="space-y-2 mb-6 text-sm text-gray-700">
-              <p>✓ Registre seus dados (nome, curso, fase)</p>
-              <p>✓ Rankear temas de preferência</p>
-              <p>✓ Busque seu resultado após distribuição</p>
-            </div>
-            <button
-              onClick={() => {
-                const distributionId = prompt('ID da Distribuição:');
-                if (distributionId) {
-                  navigate(`/student/form/${distributionId}`);
-                }
-              }}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition"
-            >
-              Começar como Aluno
-            </button>
-          </div>
 
-          {/* Card Organizadores */}
-          <div className="bg-white rounded-lg shadow-2xl p-8 hover:shadow-3xl transition transform hover:scale-105">
-            <div className="text-5xl mb-4">👨‍💼</div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Para Organizadores</h2>
-            <p className="text-gray-600 mb-6">
-              Gerencie a distribuição de alunos em grupos com base em suas preferências.
+            <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
+              <button
+                onClick={handleStudentAccess}
+                className="inline-flex items-center rounded-xl bg-[var(--brand-600)] px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-700)]"
+              >
+                Acesso do aluno
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </button>
+              <button
+                onClick={() => navigate('/login')}
+                className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Area do organizador
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:px-8">
+        <div className="grid gap-6 md:grid-cols-3">
+          <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 inline-flex rounded-xl bg-[var(--brand-100)] p-2.5 text-[var(--brand-700)]">
+              <BrainCircuit className="h-5 w-5" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900">Otimizacao inteligente</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Combina preferencias, diversidade de fases e restricoes para gerar distribuicoes mais consistentes.
             </p>
-            <div className="space-y-2 mb-6 text-sm text-gray-700">
-              <p>✓ Criar distribuição</p>
-              <p>✓ Upload de temas/projetos</p>
-              <p>✓ Executar algoritmo de distribuição</p>
-              <p>✓ Visualizar resultados</p>
-            </div>
-            <button
-              onClick={() => navigate('/login')}
-              className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 px-6 rounded-lg transition"
-            >
-              Login de Organizador
-            </button>
-          </div>
-        </div>
+          </article>
 
-        {/* Features */}
-        <div className="bg-white rounded-lg shadow-lg p-8">
-          <h3 className="text-2xl font-bold text-gray-900 mb-6 text-center">
-            ⚡ Características do Sistema
-          </h3>
-          <div className="grid md:grid-cols-3 gap-6 text-center">
-            <div>
-              <div className="text-4xl mb-2">🤖</div>
-              <h4 className="font-semibold text-gray-900 mb-2">Algoritmo Inteligente</h4>
-              <p className="text-gray-600 text-sm">
-                Otimização em 3 fases: geração inicial, busca local e simulated annealing
-              </p>
+          <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 inline-flex rounded-xl bg-emerald-100 p-2.5 text-emerald-700">
+              <BarChart3 className="h-5 w-5" />
             </div>
-            <div>
-              <div className="text-4xl mb-2">📊</div>
-              <h4 className="font-semibold text-gray-900 mb-2">Satisfação Maximizada</h4>
-              <p className="text-gray-600 text-sm">
-                Maximiza preferências dos alunos mantendo restrições críticas
-              </p>
+            <h3 className="text-lg font-bold text-slate-900">Acompanhamento claro</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              O organizador acompanha progresso, validacoes e resultados em etapas, sem sobrecarga visual.
+            </p>
+          </article>
+
+          <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 inline-flex rounded-xl bg-amber-100 p-2.5 text-amber-700">
+              <ShieldCheck className="h-5 w-5" />
             </div>
-            <div>
-              <div className="text-4xl mb-2">⚙️</div>
-              <h4 className="font-semibold text-gray-900 mb-2">Restrições Garantidas</h4>
-              <p className="text-gray-600 text-sm">
-                1-2 EE por grupo, mínimo 2 fases diferentes, diversidade máxima
-              </p>
-            </div>
-          </div>
+            <h3 className="text-lg font-bold text-slate-900">Regras preservadas</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Mantem o controle de equilibrio entre cursos e fases para respeitar criterios academicos definidos.
+            </p>
+          </article>
         </div>
-      </div>
+      </section>
+
+      <section className="border-y border-slate-200 bg-white/80">
+        <div className="mx-auto grid max-w-4xl gap-5 px-4 py-12 sm:grid-cols-2 sm:px-6 lg:px-8">
+          <button
+            type="button"
+            onClick={handleStudentAccess}
+            className="group rounded-2xl border border-slate-200 bg-white p-6 text-left shadow-sm transition hover:shadow"
+          >
+            <div className="mb-5 flex items-center justify-between">
+              <div className="rounded-xl bg-[var(--brand-100)] p-2.5 text-[var(--brand-700)]">
+                <Users className="h-5 w-5" />
+              </div>
+              <ArrowRight className="h-4 w-4 text-slate-400 transition group-hover:text-[var(--brand-700)]" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900">Sou aluno</h3>
+            <p className="mt-2 text-sm text-slate-600">Registro rapido, preferencias e consulta de resultado.</p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/login')}
+            className="group rounded-2xl border border-slate-200 bg-white p-6 text-left shadow-sm transition hover:shadow"
+          >
+            <div className="mb-5 flex items-center justify-between">
+              <div className="rounded-xl bg-slate-100 p-2.5 text-slate-700">
+                <LayoutDashboard className="h-5 w-5" />
+              </div>
+              <ArrowRight className="h-4 w-4 text-slate-400 transition group-hover:text-slate-700" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900">Sou organizador</h3>
+            <p className="mt-2 text-sm text-slate-600">Fluxo guiado para configurar, executar e revisar distribuicoes.</p>
+          </button>
+        </div>
+      </section>
+
+      <footer className="py-10 text-center text-xs text-slate-500">
+        <p>&copy; {new Date().getFullYear()} Sistema de Distribuicao de Grupos Interdisciplinares.</p>
+      </footer>
     </div>
   );
 }

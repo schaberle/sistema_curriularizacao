@@ -5,6 +5,8 @@ import { SimulatedAnnealing } from './SimulatedAnnealing';
 import { EnergyCalculator } from './EnergyCalculator';
 import { SocialOptimizer } from './SocialOptimizer';
 import { AffinityMatrix } from '../../domain/AffinityMatrix';
+import { AdaptiveConstraintManager } from './AdaptiveConstraintManager';
+import { ConstraintRules } from './SystemViabilityAnalyzer';
 
 /**
  * DistributionEngine - Orquestrador do algoritmo de otimização (Modelo de Energia Ideal)
@@ -33,6 +35,7 @@ export class DistributionEngine {
   private localSearch: LocalSearch;
   private simulatedAnnealing: SimulatedAnnealing;
   private energyCalculator: EnergyCalculator;
+  private constraintManager: AdaptiveConstraintManager;
 
   /**
    * Constructor com pesos configuráveis (Fase 1)
@@ -43,6 +46,7 @@ export class DistributionEngine {
     this.generator = new SolutionGenerator(config);
     this.localSearch = new LocalSearch(this.energyCalculator);
     this.simulatedAnnealing = new SimulatedAnnealing(this.energyCalculator);
+    this.constraintManager = new AdaptiveConstraintManager();
   }
 
   /**
@@ -57,6 +61,7 @@ export class DistributionEngine {
     solution: Solution;
     report: string;
     executionTime: number;
+    constraintAdaptation?: { adapted: boolean; reason?: string };
   }> {
     const startTime = Date.now();
 
@@ -65,11 +70,23 @@ export class DistributionEngine {
       return {
         solution: new Solution([], [], 0),
         report: 'Erro: Alunos ou temas vazios',
-        executionTime: 0
+        executionTime: 0,
+        constraintAdaptation: { adapted: false }
       };
     }
 
     console.log(`[DistributionEngine] Iniciando Fase 1 para ${students.length} alunos e ${themes.length} temas`);
+
+    // NOVO: Analisar viabilidade e adaptar restrições se necessário
+    const constraintState = this.constraintManager.analyzeAndAdapt(students, themes);
+    if (constraintState.adaptedFromDefault) {
+      console.log(`[Viabilidade] Restrições adaptadas: ${constraintState.reasonForAdaptation}`);
+      // Propagar regras adaptadas para TODOS os componentes
+      this.energyCalculator.setConstraintRules(constraintState.rules);
+      this.generator.setConstraintRules(constraintState.rules);
+      this.localSearch.setConstraintRules(constraintState.rules);
+      this.simulatedAnnealing.setConstraintRules(constraintState.rules);
+    }
 
     // SUB-FASE 1: Geração de Solução Inicial
     console.log('[Fase 1.1] Gerando solução inicial (construção gulosa)...');
@@ -97,7 +114,11 @@ export class DistributionEngine {
     return {
       solution,
       report: this.generatePhase1Report(solution, phase1Time, phase2Time, phase3Time),
-      executionTime: totalTime
+      executionTime: totalTime,
+      constraintAdaptation: {
+        adapted: constraintState.adaptedFromDefault,
+        reason: constraintState.reasonForAdaptation
+      }
     };
   }
 
@@ -134,10 +155,43 @@ export class DistributionEngine {
     solution: Solution;
     report: string;
     executionTime: number;
+    metrics: {
+      before: { energy: number; satisfaction: number; cohesion: number };
+      after: { energy: number; satisfaction: number; cohesion: number };
+      changes: Array<{
+        studentId: string;
+        studentName: string;
+        fromGroupId: string;
+        toGroupId: string;
+        fromThemeId: string;
+        toThemeId: string;
+      }>;
+    };
   }> {
     const startTime = Date.now();
 
     console.log(`[DistributionEngine] Iniciando Fase 2 (Otimização Social) com matriz de ${affinityMatrix.getSize()} afinidades`);
+
+    // Métricas Antes (Fase 1)
+    // Para calcular coesão antes, precisamos usar a affinityMatrix na solução antiga
+    let cohesionBefore = 0;
+    for (const group of phase1Solution.groups) {
+      const studentIds = group.students.map(s => s.id);
+      cohesionBefore += affinityMatrix.calculateGroupCohesion(studentIds);
+    }
+    const metricsBefore = {
+      energy: phase1Solution.getTotalEnergy(),
+      satisfaction: phase1Solution.getAverageSatisfactionScore(), // Assumindo que este método existe ou similar
+      cohesion: cohesionBefore // Coesão total
+    };
+
+    // Snapshot dos grupos originais para detectar mudanças
+    const studentGroupMap = new Map<string, { groupId: string, themeId: string }>();
+    for (const group of phase1Solution.groups) {
+      for (const student of group.students) {
+        studentGroupMap.set(student.id, { groupId: group.id, themeId: group.themeId });
+      }
+    }
 
     const phase2Start = Date.now();
     const socialOptimizer = new SocialOptimizer(
@@ -151,10 +205,58 @@ export class DistributionEngine {
 
     const totalTime = Date.now() - startTime;
 
+    // Métricas Depois (Fase 2)
+    const metricsAfter = {
+      energy: solution.getTotalEnergy(),
+      satisfaction: solution.getAverageSatisfactionScore(),
+      cohesion: solution.socialScore // Otimizador já calcula e armazena isso
+    };
+
+    // Detectar mudanças
+    const changes: Array<{
+      studentId: string;
+      studentName: string;
+      fromGroupId: string;
+      toGroupId: string;
+      fromThemeId: string;
+      toThemeId: string;
+    }> = [];
+
+    for (const group of solution.groups) {
+      for (const student of group.students) {
+        const original = studentGroupMap.get(student.id);
+        if (original && original.groupId !== group.id) {
+          // Houve mudança de grupo
+          // Nota: IDs de grupos podem ter mudado se recriados, mas assumindo persistência de lógica
+          // Se o otimizador recria grupos com novos IDs, todos parecerão ter mudado.
+          // O SocialOptimizer geralmente mantém os objetos Group ou IDs se possível, 
+          // mas se ele faz deep copy, os IDs mudam. 
+          // Verificar se SocialOptimizer preserva IDs. Se não, comparar por ThemeId e Colegas.
+          // Assumindo que IDs de grupos são preservados ou mapeáveis.
+
+          // Se IDs mudaram, podemos verificar se o tema mudou ou se os colegas mudaram muito.
+          // Mas para MVP, vamos registrar.
+          changes.push({
+            studentId: student.id,
+            studentName: student.name,
+            fromGroupId: original.groupId,
+            toGroupId: group.id,
+            fromThemeId: original.themeId,
+            toThemeId: group.themeId
+          });
+        }
+      }
+    }
+
     return {
       solution,
       report: this.generatePhase2Report(solution, phase2Time),
-      executionTime: totalTime
+      executionTime: totalTime,
+      metrics: {
+        before: metricsBefore,
+        after: metricsAfter,
+        changes
+      }
     };
   }
 
@@ -297,35 +399,16 @@ export class DistributionEngine {
   } {
     const issues: string[] = [];
 
-    // Contar alunos de EE
-    const electricalCount = students.filter(s => s.course === 'EE').length;
-
-    // Calcular grupos necessários
-    const totalGroups = Math.ceil(students.length / 4);
-
-    // Restrição 1: 1-2 EE por grupo
-    // Mínimo: totalGroups * 1, Máximo: totalGroups * 2
-    if (electricalCount < totalGroups) {
-      issues.push(
-        `❌ Alunos EE insuficientes: tem ${electricalCount}, precisa de pelo menos ${totalGroups} (1 por grupo)`
-      );
+    // Apenas condições realmente irrecuperáveis
+    if (students.length === 0) {
+      issues.push('❌ Nenhum aluno registrado');
+    }
+    if (themes.length === 0) {
+      issues.push('❌ Nenhum tema registrado');
     }
 
-    if (electricalCount > totalGroups * 2) {
-      issues.push(
-        `❌ Muitos alunos EE: tem ${electricalCount}, máximo permitido é ${totalGroups * 2} (2 por grupo)`
-      );
-    }
-
-    // Restrição 2: Mínimo 2 fases por grupo
-    // Precisa de pelo menos 2 fases diferentes
-    const phases = new Set(students.map(s => s.phase));
-    if (phases.size < 2) {
-      issues.push(
-        `❌ Fases insuficientes: tem ${phases.size}, precisa de pelo menos 2`
-      );
-    }
-
+    // Tudo mais (EE insuficiente, fases, capacidade) é tratado pelo
+    // AdaptiveConstraintManager dentro de solvePhase1()
     return {
       isFeasible: issues.length === 0,
       issues

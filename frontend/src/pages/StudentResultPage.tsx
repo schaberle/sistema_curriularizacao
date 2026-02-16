@@ -1,27 +1,55 @@
-import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+﻿import { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { AlertTriangle, BookOpen, CheckCircle, Heart, Layers, Search, User, Users } from 'lucide-react';
 import api from '../services/api';
-import { Search, User, BookOpen, Layers, CheckCircle, AlertTriangle, Users, FileText } from 'lucide-react';
+import { StudentDistributionAccess } from '../types/student.types';
 
 /**
- * StudentResultPage - Página pública para aluno buscar seu resultado
+ * StudentResultPage - Pagina publica para aluno buscar seu resultado
  */
 export function StudentResultPage() {
   const { distributionId } = useParams<{ distributionId: string }>();
+  const navigate = useNavigate();
 
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState('');
   const [result, setResult] = useState<any>(null);
   const [searched, setSearched] = useState(false);
+  const [access, setAccess] = useState<StudentDistributionAccess | null>(null);
+
+  useEffect(() => {
+    const loadAccess = async () => {
+      if (!distributionId) return;
+
+      try {
+        setInitialLoading(true);
+        const response = await api.getStudentDistributionAccess(distributionId);
+        setAccess(response.data || null);
+      } catch (err: any) {
+        setError(err.response?.data?.error || 'Nao foi possivel carregar dados da distribuicao');
+      } finally {
+        setInitialLoading(false);
+      }
+    };
+
+    loadAccess();
+  }, [distributionId]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setResult(null);
+    setSearched(true);
 
     if (!name || !distributionId) {
       setError('Digite seu nome');
+      return;
+    }
+
+    if (access && !access.resultsAvailable) {
+      setError('Resultados ainda nao foram liberados para esta distribuicao.');
       return;
     }
 
@@ -32,15 +60,22 @@ export function StudentResultPage() {
       if (response.found) {
         setResult(response.data);
       } else {
-        setError(response.message || 'Aluno não encontrado');
+        setError(response.message || 'Aluno nao encontrado');
       }
-      setSearched(true);
     } catch (err: any) {
-      setError('Erro ao buscar resultado');
+      setError(err.response?.data?.error || 'Erro ao buscar resultado');
     } finally {
       setLoading(false);
     }
   };
+
+  if (initialLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center py-12 px-4">
+        <p className="text-slate-600">Carregando status da distribuicao...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6 lg:px-8 font-sans">
@@ -49,17 +84,21 @@ export function StudentResultPage() {
           <div className="mx-auto h-12 w-12 bg-blue-100 rounded-full flex items-center justify-center mb-4">
             <Search className="h-6 w-6 text-blue-600" />
           </div>
-          <h1 className="text-3xl font-bold text-slate-900">Consultar Resultado</h1>
-          <p className="mt-2 text-slate-600">Busque por seu nome para visualizar seu grupo atribuído</p>
+          <h1 className="text-3xl font-bold text-slate-900">Consultar resultado</h1>
+          <p className="mt-2 text-slate-600">Busque por seu nome para visualizar seu grupo atribuido</p>
         </div>
 
-        {/* Formulário de busca */}
+        {!access?.resultsAvailable && (
+          <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-800">
+            <p className="font-medium">Resultados ainda nao liberados</p>
+            <p className="text-sm mt-1">A distribuicao ainda nao concluiu a Fase 1.</p>
+          </div>
+        )}
+
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-8 mb-8">
           <form onSubmit={handleSearch} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Seu Nome Completo
-              </label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Seu nome completo</label>
               <div className="relative rounded-md shadow-sm">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                   <User className="h-5 w-5 text-slate-400" />
@@ -69,8 +108,8 @@ export function StudentResultPage() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="block w-full pl-10 sm:text-sm border-slate-300 rounded-md focus:ring-blue-500 focus:border-blue-500 p-2.5 border"
-                  placeholder="Ex: João Silva"
-                  disabled={loading}
+                  placeholder="Ex: Joao Silva"
+                  disabled={loading || !access?.resultsAvailable}
                 />
               </div>
             </div>
@@ -84,27 +123,25 @@ export function StudentResultPage() {
 
             <button
               type="submit"
-              disabled={loading}
-              className="w-full flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-300 transition-colors"
+              disabled={loading || !access?.resultsAvailable}
+              className="w-full flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 transition-colors"
             >
-              {loading ? 'Consultando...' : 'Buscar Agora'}
+              {loading ? 'Consultando...' : 'Buscar agora'}
             </button>
           </form>
         </div>
 
-        {/* Resultado */}
         {result && (
           <div className="bg-white rounded-lg shadow-md border border-slate-200 overflow-hidden">
             <div className="border-b border-slate-200 bg-green-50 px-6 py-4 flex items-center">
               <CheckCircle className="h-6 w-6 text-green-600 mr-3" />
-              <h2 className="text-lg font-medium text-green-800">Aluno Encontrado</h2>
+              <h2 className="text-lg font-medium text-green-800">Aluno encontrado</h2>
             </div>
 
             <div className="p-8">
               <div className="grid md:grid-cols-2 gap-8 mb-8">
-                {/* Dados pessoais */}
                 <div>
-                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-100 pb-2">Seus Dados</h3>
+                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-100 pb-2">Seus dados</h3>
                   <div className="space-y-4">
                     <div className="flex items-start">
                       <User className="h-5 w-5 text-slate-400 mr-3 mt-0.5" />
@@ -117,135 +154,74 @@ export function StudentResultPage() {
                       <BookOpen className="h-5 w-5 text-slate-400 mr-3 mt-0.5" />
                       <div>
                         <p className="text-sm text-slate-500">Curso</p>
-                        <p className="font-medium text-slate-900">{result.course === 'EE' ? 'Engenharia Elétrica' : 'Engenharia Mecânica'}</p>
+                        <p className="font-medium text-slate-900">{result.course === 'EE' ? 'Engenharia Eletrica' : 'Engenharia Mecanica'}</p>
                       </div>
                     </div>
                     <div className="flex items-start">
                       <Layers className="h-5 w-5 text-slate-400 mr-3 mt-0.5" />
                       <div>
                         <p className="text-sm text-slate-500">Fase</p>
-                        <p className="font-medium text-slate-900">{result.phase}ª Fase</p>
+                        <p className="font-medium text-slate-900">{result.phase}a fase</p>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Informações do grupo */}
                 {result.group && (
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-100 pb-2">Grupo Atribuído</h3>
+                    <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-100 pb-2">Grupo atribuido</h3>
                     <div className="bg-blue-50 rounded-lg p-5 border border-blue-100">
-                      <div className="flex items-start mb-3">
-                        <FileText className="h-5 w-5 text-blue-600 mr-3 mt-0.5" />
-                        <div>
-                          <p className="text-xs text-blue-600 font-semibold uppercase">Tema</p>
-                          <p className="font-bold text-slate-900">{result.group.themeName}</p>
-                        </div>
-                      </div>
-                      <p className="text-sm text-slate-600 ml-8 mb-4">{result.group.themeDescription}</p>
-                      <div className="ml-8 text-xs text-slate-400 font-mono bg-white inline-block px-2 py-1 rounded border border-slate-200">
-                        ID: {result.group.id}
-                      </div>
+                      <p className="text-xs text-blue-600 font-semibold uppercase">Tema</p>
+                      <p className="font-bold text-slate-900">{result.group.themeName}</p>
+                      <p className="text-sm text-slate-600 mt-2">{result.group.themeDescription}</p>
+
+                      {typeof result.group.socialCohesionScore === 'number' && (
+                        <p className="mt-3 text-sm text-slate-700">
+                          Coesao social: <span className="font-semibold">{result.group.socialCohesionScore.toFixed(2)}</span>
+                        </p>
+                      )}
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* Membros do grupo */}
-              {/* Coesão Social (Fase 2) */}
-              {result.group?.socialCohesionScore !== undefined && (
-                <div className="mb-8 p-6 rounded-lg border-2" style={{
-                  borderColor: result.group.socialCohesionScore > 0 ? '#86efac' : result.group.socialCohesionScore < 0 ? '#fca5a5' : '#cbd5e1',
-                  backgroundColor: result.group.socialCohesionScore > 0 ? '#f0fdf4' : result.group.socialCohesionScore < 0 ? '#fef2f2' : '#f8fafc'
-                }}>
-                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4 border-b pb-2 flex items-center" style={{
-                    borderColor: result.group.socialCohesionScore > 0 ? '#bbf7d0' : result.group.socialCohesionScore < 0 ? '#fbcacb' : '#cbd5e1'
-                  }}>
-                    💚 Coesão Social do Grupo (Fase 2)
-                  </h3>
-
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-700 font-medium">Score de Coesão:</span>
-                      <span className="text-2xl font-bold" style={{
-                        color: result.group.socialCohesionScore > 0 ? '#16a34a' : result.group.socialCohesionScore < 0 ? '#dc2626' : '#64748b'
-                      }}>
-                        {result.group.socialCohesionScore.toFixed(2)}
-                      </span>
-                    </div>
-
-                    {result.group.socialCohesionScore > 0 && (
-                      <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-green-800 text-sm">
-                        ✅ <strong>Excelente!</strong> Seu grupo tem ótima afinidade entre os membros.
-                      </div>
-                    )}
-
-                    {result.group.socialCohesionScore < 0 && (
-                      <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
-                        ⚠️ <strong>Atenção:</strong> Há baixa afinidade entre alguns membros, mas o grupo foi otimizado.
-                      </div>
-                    )}
-
-                    {result.group.socialCohesionScore === 0 && (
-                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-sm">
-                        ➖ <strong>Neutro:</strong> O grupo não tem afinidades significativas registradas.
-                      </div>
-                    )}
-
-                    <p className="text-xs text-slate-600 mt-3">
-                      A coesão social foi calculada com base nas afinidades declaradas na Fase 2 de otimização.
-                    </p>
-                  </div>
-                </div>
-              )}
-
               {result.group?.members && (
                 <div>
                   <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-100 pb-2 flex items-center">
                     <Users className="h-4 w-4 mr-2" />
-                    Integrantes do Grupo
+                    Integrantes do grupo
                   </h3>
                   <div className="grid sm:grid-cols-2 gap-4">
                     {result.group.members.map((member: any, index: number) => (
-                      <div
-                        key={index}
-                        className="p-4 bg-slate-50 border border-slate-200 rounded-lg flex items-center"
-                      >
-                        <div className="h-10 w-10 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-400 font-bold text-sm mr-4">
-                          {member.name.charAt(0)}
-                        </div>
-                        <div>
-                          <p className="font-semibold text-slate-900 text-sm">{member.name}</p>
-                          <p className="text-xs text-slate-500">
-                            {member.course} • {member.phase}ª Fase
-                          </p>
-                        </div>
+                      <div key={index} className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                        <p className="font-semibold text-slate-900 text-sm">{member.name}</p>
+                        <p className="text-xs text-slate-500 mt-1">{member.course} • {member.phase}a fase</p>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {result.message && (
-                <div className="mt-8 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start text-amber-800">
-                  <AlertTriangle className="h-5 w-5 mr-3 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-medium">Atenção</p>
-                    <p className="text-sm mt-1">{result.message}</p>
-                  </div>
+              {result.studentId && distributionId && access?.affinitiesOpen && (
+                <div className="mt-8 rounded-lg border border-rose-200 bg-rose-50 p-4">
+                  <p className="text-sm text-rose-900">A coleta de afinidades esta aberta para esta distribuicao.</p>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/student/${result.studentId}/affinities/${distributionId}`)}
+                    className="mt-3 inline-flex items-center rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
+                  >
+                    <Heart className="mr-2 h-4 w-4" />
+                    Declarar/atualizar afinidades
+                  </button>
+                </div>
+              )}
+
+              {result.studentId && distributionId && access?.phase2Executed && (
+                <div className="mt-8 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                  Coleta de afinidades encerrada apos execucao da Fase 2.
                 </div>
               )}
             </div>
-          </div>
-        )}
-
-        {searched && !result && !error && (
-          <div className="text-center py-12">
-            <div className="mx-auto h-16 w-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-              <Search className="h-8 w-8 text-slate-300" />
-            </div>
-            <h3 className="text-lg font-medium text-slate-900">Nenhum resultado encontrado</h3>
-            <p className="text-slate-500 mt-2">Verifique se o nome foi digitado corretamente.</p>
           </div>
         )}
       </div>

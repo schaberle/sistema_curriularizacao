@@ -11,6 +11,11 @@ import { asyncHandler } from '../middleware/error.middleware';
 export function createPublicRoutes(database: DatabaseService): Router {
   const router = Router();
 
+  router.use((req, _res, next) => {
+    console.log(`[PublicRoutes] Request: ${req.method} ${req.url}`);
+    next();
+  });
+
   /**
    * GET /api/search
    * Busca resultado de distribuição para um aluno (busca pública, sem autenticação)
@@ -64,6 +69,15 @@ export function createPublicRoutes(database: DatabaseService): Router {
           distributionId: string;
         };
 
+        const access = await database.getStudentAccessState(distributionId);
+        if (!access.resultsAvailable) {
+          return res.status(403).json({
+            success: false,
+            error: 'Resultados ainda nao estao disponiveis para esta distribuicao',
+            data: access,
+          });
+        }
+
         // Buscar aluno
         const student = await database.getStudentByName(name, distributionId);
 
@@ -83,6 +97,7 @@ export function createPublicRoutes(database: DatabaseService): Router {
             success: true,
             found: true,
             data: {
+              studentId: student.id,
               studentName: student.name,
               course: student.course,
               phase: student.phase,
@@ -92,9 +107,8 @@ export function createPublicRoutes(database: DatabaseService): Router {
         }
 
         // Buscar informações detalhadas do grupo
-        const group = await database.getGroup(groupData.id);
-        const groupStudentIds = await database.getGroupStudents(groupData.id);
         const theme = await database.getTheme(groupData.theme_id);
+        const groupStudentIds = await database.getGroupStudents(groupData.id);
 
         // Buscar informações de todos os alunos do grupo
         const members = [];
@@ -113,6 +127,7 @@ export function createPublicRoutes(database: DatabaseService): Router {
           success: true,
           found: true,
           data: {
+            studentId: student.id,
             studentName: student.name,
             course: student.course,
             phase: student.phase,
@@ -121,6 +136,10 @@ export function createPublicRoutes(database: DatabaseService): Router {
               themeId: groupData.theme_id,
               themeName: theme?.name || 'Tema desconhecido',
               themeDescription: theme?.description || '',
+              socialCohesionScore:
+                groupData.social_cohesion_score !== undefined && groupData.social_cohesion_score !== null
+                  ? Number(groupData.social_cohesion_score)
+                  : undefined,
               members,
             },
           },
@@ -128,69 +147,6 @@ export function createPublicRoutes(database: DatabaseService): Router {
       } catch (error: any) {
         res.status(500).json({
           error: 'Erro ao buscar resultado',
-          message: error.message,
-        });
-      }
-    })
-  );
-
-  /**
-   * GET /api/themes/:distributionId
-   * Lista todos os temas de uma distribuição (para escolha de preferências)
-   *
-   * Params:
-   * - distributionId: ID da distribuição
-   *
-   * Response 200:
-   * {
-   *   "success": true,
-   *   "data": {
-   *     "themes": [
-   *       {
-   *         "id": "tema_a",
-   *         "name": "Tema A",
-   *         "description": "Descrição A",
-   *         "maxGroups": 2
-   *       },
-   *       ...
-   *     ]
-   *   }
-   * }
-   *
-   * Response 404: Distribuição não encontrada
-   * Response 500: Erro interno
-   */
-  router.get(
-    '/themes/:distributionId',
-    asyncHandler(async (req: Request, res: Response) => {
-      try {
-        const distributionId = req.params.distributionId as string;
-
-        // Verificar se distribuição existe
-        const distribution = await database.getDistribution(distributionId);
-        if (!distribution) {
-          return res.status(404).json({
-            error: 'Distribuição não encontrada',
-          });
-        }
-
-        // Buscar temas
-        const themes = await database.getThemesByDistribution(distributionId);
-
-        res.status(200).json({
-          success: true,
-          data: {
-            themes: themes.map((t: any) => ({
-              id: t.id,
-              name: t.name,
-              description: t.description,
-              maxGroups: t.max_groups,
-            })),
-          },
-        });
-      } catch (error: any) {
-        res.status(500).json({
-          error: 'Erro ao buscar temas',
           message: error.message,
         });
       }

@@ -3,6 +3,17 @@ import { DatabaseService } from '../services/database/DatabaseService';
 import { validateStudentRegistration, validateStudentPreferences } from '../middleware/validation.middleware';
 import { asyncHandler } from '../middleware/error.middleware';
 
+function clampNormalized(value: number): number {
+  return Math.max(-1, Math.min(1, value));
+}
+
+function toNormalizedAffinity(value: number): number {
+  if (value >= -1 && value <= 1) {
+    return clampNormalized(value);
+  }
+  return clampNormalized(value / 100);
+}
+
 /**
  * Student Routes - Rotas de Aluno
  *
@@ -15,6 +26,62 @@ import { asyncHandler } from '../middleware/error.middleware';
  */
 export function createStudentRoutes(database: DatabaseService): Router {
   const router = Router();
+
+  function getAccessMessage(
+    access: { registrationOpen: boolean; resultsAvailable: boolean; affinitiesOpen: boolean; phase2Executed: boolean },
+    context: 'registration' | 'results' | 'affinities'
+  ): string {
+    if (context === 'registration' && !access.registrationOpen) {
+      return 'Cadastro de alunos fechado para esta distribuicao';
+    }
+
+    if (context === 'results' && !access.resultsAvailable) {
+      return 'Resultados ainda nao foram liberados para esta distribuicao';
+    }
+
+    if (context === 'affinities') {
+      if (access.phase2Executed) {
+        return 'Coleta de afinidades encerrada apos execucao da Fase 2';
+      }
+      if (!access.affinitiesOpen) {
+        return 'Coleta de afinidades ainda nao esta aberta para esta distribuicao';
+      }
+    }
+
+    return 'Acao indisponivel no estado atual da distribuicao';
+  }
+
+  /**
+   * GET /api/students/distribution/:distributionId/access
+   * Estado de acesso publico do fluxo do aluno.
+   */
+  router.get(
+    '/distribution/:distributionId/access',
+    asyncHandler(async (req: Request, res: Response) => {
+      const distributionId = req.params.distributionId as string;
+
+      try {
+        const distribution = await database.getDistribution(distributionId);
+        if (!distribution) {
+          return res.status(404).json({
+            error: 'Distribuicao nao encontrada',
+          });
+        }
+
+        const access = await database.getStudentAccessState(distributionId);
+
+        res.status(200).json({
+          success: true,
+          data: access,
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          error: 'Erro ao verificar acesso da distribuicao',
+          message: error.message,
+        });
+      }
+    })
+  );
 
   /**
    * POST /api/students/:distributionId
@@ -57,6 +124,14 @@ export function createStudentRoutes(database: DatabaseService): Router {
         if (!distribution) {
           return res.status(404).json({
             error: 'Distribuição não encontrada',
+          });
+        }
+
+        const access = await database.getStudentAccessState(distributionId);
+        if (!access.registrationOpen) {
+          return res.status(403).json({
+            error: getAccessMessage(access, 'registration'),
+            data: access,
           });
         }
 
@@ -129,6 +204,14 @@ export function createStudentRoutes(database: DatabaseService): Router {
         if (!student) {
           return res.status(404).json({
             error: 'Aluno não encontrado',
+          });
+        }
+
+        const access = await database.getStudentAccessState(student.distribution_id);
+        if (!access.registrationOpen) {
+          return res.status(403).json({
+            error: getAccessMessage(access, 'registration'),
+            data: access,
           });
         }
 
@@ -248,6 +331,14 @@ export function createStudentRoutes(database: DatabaseService): Router {
           });
         }
 
+        const access = await database.getStudentAccessState(student.distribution_id);
+        if (!access.resultsAvailable) {
+          return res.status(403).json({
+            error: getAccessMessage(access, 'results'),
+            data: access,
+          });
+        }
+
         // Buscar grupo do aluno
         const groupData = await database.getStudentGroup(studentId, student.distribution_id);
         if (!groupData) {
@@ -331,13 +422,23 @@ export function createStudentRoutes(database: DatabaseService): Router {
           });
         }
 
+        const access = await database.getStudentAccessState(student.distribution_id);
+        if (!access.affinitiesOpen) {
+          return res.status(403).json({
+            error: getAccessMessage(access, 'affinities'),
+            data: access,
+          });
+        }
+
         // Buscar afinidades declaradas
         const affinitiesData = await database.getStudentAffinities(studentId);
 
         const affinities = affinitiesData.map((aff: any) => ({
           targetStudentId: aff.target_student_id || aff.targetStudentId,
-          affinityValue: aff.level !== undefined ? aff.level : (aff.affinity_value_raw || 0),
-          normalizedValue: (aff.level !== undefined ? aff.level : (aff.affinity_value_raw || 0)) / 100,
+          affinityValue: Math.round(
+            toNormalizedAffinity(aff.level !== undefined ? aff.level : (aff.affinity_value_raw || 0)) * 100
+          ),
+          normalizedValue: toNormalizedAffinity(aff.level !== undefined ? aff.level : (aff.affinity_value_raw || 0)),
         }));
 
         res.status(200).json({
@@ -412,6 +513,14 @@ export function createStudentRoutes(database: DatabaseService): Router {
           });
         }
 
+        const access = await database.getStudentAccessState(distribution);
+        if (!access.affinitiesOpen) {
+          return res.status(403).json({
+            error: getAccessMessage(access, 'affinities'),
+            data: access,
+          });
+        }
+
         // Validar affinities
         if (!Array.isArray(affinities)) {
           return res.status(400).json({
@@ -427,9 +536,9 @@ export function createStudentRoutes(database: DatabaseService): Router {
             });
           }
 
-          if (aff.value < -100 || aff.value > 100) {
+          if (typeof aff.value !== 'number' || aff.value < -100 || aff.value > 100) {
             return res.status(400).json({
-              error: 'Valor de afinidade deve estar entre -100 e +100',
+              error: 'Valor de afinidade deve estar entre -100 e +100, ou -1 e +1',
               received: aff.value,
             });
           }
@@ -456,9 +565,13 @@ export function createStudentRoutes(database: DatabaseService): Router {
           await database.addStudentAffinity(
             studentId,
             aff.targetStudentId,
-            aff.value  // -100 a +100
+            toNormalizedAffinity(aff.value)
           );
           affinitiesCount++;
+        }
+
+        if (affinitiesCount > 0 && (access.status === 'COMPLETED' || access.status === 'PARTIAL')) {
+          await database.updateDistributionStatus(distribution, 'PHASE2');
         }
 
         res.status(200).json({
@@ -480,5 +593,73 @@ export function createStudentRoutes(database: DatabaseService): Router {
     })
   );
 
+  /**
+   * GET /api/students/:studentId/affinity-candidates?q=...
+   * Busca alunos de outros grupos na mesma distribuicao para declarar afinidade.
+   */
+  router.get(
+    '/:studentId/affinity-candidates',
+    asyncHandler(async (req: Request, res: Response) => {
+      const studentId = req.params.studentId as string;
+      const query = String(req.query.q || '').trim();
+
+      try {
+        if (!query || query.length < 2) {
+          return res.status(200).json({
+            success: true,
+            data: { candidates: [] },
+          });
+        }
+
+        const student = await database.getStudent(studentId);
+        if (!student) {
+          return res.status(404).json({
+            error: 'Aluno nao encontrado',
+          });
+        }
+
+        const access = await database.getStudentAccessState(student.distribution_id);
+        if (!access.affinitiesOpen) {
+          return res.status(403).json({
+            error: getAccessMessage(access, 'affinities'),
+            data: access,
+          });
+        }
+
+        const currentGroup = await database.getStudentGroup(studentId, student.distribution_id);
+        const currentGroupMemberIds = currentGroup
+          ? await database.getGroupStudents(currentGroup.id)
+          : [];
+
+        const excludeIds = Array.from(new Set([studentId, ...currentGroupMemberIds]));
+        const candidates = await database.searchStudentsByDistribution(
+          student.distribution_id,
+          query,
+          excludeIds,
+          30
+        );
+
+        res.status(200).json({
+          success: true,
+          data: {
+            candidates: candidates.map((candidate: any) => ({
+              id: candidate.id,
+              name: candidate.name,
+              course: candidate.course,
+              phase: candidate.phase,
+            })),
+          },
+        });
+      } catch (error: any) {
+        console.error('[affinity-candidates] Error:', error);
+        res.status(500).json({
+          error: 'Erro ao buscar alunos para afinidade',
+          message: error.message,
+        });
+      }
+    })
+  );
+
   return router;
 }
+

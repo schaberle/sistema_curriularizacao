@@ -1,0 +1,391 @@
+# especificação do modelo de formação de grupos (fase 1 + fase 2 social)
+
+este documento descreve, de forma implementável, um modelo em duas fases para formação e ajuste de grupos de 4 alunos com restrições duras (curso e fase) e otimização por preferências e afinidade social.
+
+---
+
+## 0. visão geral
+
+* **entrada**: lista de alunos com curso, fase e ranking de temas; (fase 2) declarações de afinidade entre pares de alunos.
+* **saída**: partição dos alunos em grupos de tamanho 4 (mais política para sobras) e tema atribuído a cada grupo.
+* **regras duras**:
+
+  1. por grupo: 1 a 2 alunos de engenharia elétrica.
+  2. por grupo: pelo menos 2 fases diferentes (meta: 3; ideal: 4).
+* **objetivo**:
+
+  * fase 1: maximizar satisfação por tema e diversidade de fase.
+  * fase 2: manter regras e preferências, mas melhorar coesão social via afinidade declarada.
+
+---
+
+## 1. dados e contratos
+
+### 1.1 aluno
+
+para cada aluno (a):
+
+* identificador: (id_a)
+* curso: (c_a \in {E,M}) onde (E)=elétrica, (M)=mecânica
+* fase: (f_a \in \mathbb{Z}_{\ge 1})
+* ranking de temas: lista ordenada (R_a = (t_{a,1}, t_{a,2}, \dots, t_{a,K})) com ({t_{a,i}}=\mathcal{T})
+
+### 1.2 temas
+
+* conjunto de temas: (\mathcal{T} = {1,\dots,K})
+* opcional: capacidade (cap_t) (número máximo de grupos no tema (t))
+
+### 1.3 afinidade (fase 2)
+
+* conjunto de declarações observadas: (\Omega \subseteq {(i,j): i<j})
+* para ((i,j)\in\Omega), afinidade (A_{ij} \in [-1,1])
+
+  * (A_{ij}>0): afinidade/atração
+  * (A_{ij}<0): rejeição
+  * (A_{ij}=0): neutro
+* se ((i,j)\notin\Omega): **não manifestado** → tratar como 0 no cálculo.
+* simetria: (A_{ij}=A_{ji}), e (A_{ii}=0).
+
+---
+
+## 2. restrições duras (viabilidade)
+
+considere um grupo (g\subset\mathcal{A}) com (|g|=4).
+
+### 2.1 curso
+
+[
+1 \le \sum_{a\in g} \mathbf{1}[c_a=E] \le 2
+]
+
+### 2.2 diversidade de fase
+
+[
+|{f_a: a\in g}| \ge 2
+]
+
+(meta: (\ge 3); ideal: (=4))
+
+### 2.3 condição necessária de existência (grupos completos)
+
+seja (G=\lfloor N/4\rfloor) e (n_E) o total de alunos elétricos.
+
+[
+G \le n_E \le 2G
+]
+
+se a condição falhar, ver seção 8 (contingências).
+
+---
+
+## 3. utilidade de preferência por tema
+
+### 3.1 utilidade por posição no ranking
+
+seja (pos_a(t)\in{1,\dots,K}) a posição do tema (t) no ranking do aluno (a).
+
+define-se uma função decrescente (g(p)) e:
+
+[
+u_{a,t}=g(pos_a(t))
+]
+
+exemplo discreto (ajustável):
+
+[
+g(1)=100,; g(2)=70,; g(3)=50,; g(4)=35,; g(5)=25,; g(6)=18,; g(7)=12,; g(8)=8
+]
+
+### 3.2 normalização (opcional)
+
+[
+\tilde u_{a,t} = \frac{u_{a,t}-\min_{t'} u_{a,t'}}{\max_{t'} u_{a,t'}-\min_{t'} u_{a,t'}} \in [0,1]
+]
+
+---
+
+## 4. energia/custo do grupo
+
+usamos uma função de custo (energia) a ser minimizada. restrições duras são implementadas por **máscara de viabilidade**: custo infinito para estados inválidos.
+
+### 4.1 termos auxiliares
+
+* número de fases distintas no grupo:
+  [
+  D(g)=|{f_a: a\in g}|
+  ]
+
+* duplicatas de fase:
+  [
+  \mathrm{dup}(g)=\sum_h \max(0, n_h(g)-1)
+  ]
+
+onde (n_h(g)) é a contagem de alunos da fase (h) em (g).
+
+### 4.2 custo de preferência (fase 1 e 2)
+
+para um grupo (g) com tema (t):
+
+[
+E_{pref}(g,t) = -w_{pref}\sum_{a\in g} \tilde u_{a,t}
+]
+
+### 4.3 custo de fase (fase 1 e 2)
+
+[
+E_{fase}(g)= w_{dup},\mathrm{dup}(g) - w_{div},D(g)
+]
+
+### 4.4 custo social (somente fase 2)
+
+[
+E_{soc}(g) = -w_{soc}\sum_{{i,j}\subset g} A_{ij}
+]
+
+observações:
+
+* pares não manifestados contribuem 0.
+* quanto mais afinidade positiva interna, menor o custo.
+
+### 4.5 energia total do grupo com máscara dura
+
+[
+E(g,t)=
+\begin{cases}
+E_{pref}(g,t)+E_{fase}(g), & \text{fase 1 e } g \text{ viável}\
+E_{pref}(g,t)+E_{fase}(g)+E_{soc}(g), & \text{fase 2 e } g \text{ viável}\
++\infty, & \text{caso contrário}
+\end{cases}
+]
+
+---
+
+## 5. atribuição de tema por grupo
+
+dado um grupo (g) (membros fixos), selecionar o tema que minimiza energia:
+
+[
+t_g^* = \arg\min_{t\in\mathcal{T}} E(g,t)
+]
+
+como (E_{fase}) e (E_{soc}) não dependem de (t), isto equivale a:
+
+[
+t_g^* = \arg\max_{t\in\mathcal{T}} \sum_{a\in g} \tilde u_{a,t}
+]
+
+se houver capacidade por tema, impor:
+
+[
+\sum_{g} \mathbf{1}[t_g=t] \le cap_t
+]
+
+(violação → (+\infty) ou penalidade alta).
+
+---
+
+## 6. algoritmo fase 1 (formação inicial)
+
+### 6.1 objetivo
+
+produzir uma partição em grupos de 4 **viáveis** e com boa utilidade por tema + diversidade de fase.
+
+### 6.2 construção gulosa (sugestão implementável)
+
+1. calcular (G=\lfloor N/4\rfloor). separar excedente (r=N-4G).
+2. criar (G) grupos vazios.
+3. distribuir alunos elétricos garantindo **1 por grupo** (se possível).
+4. distribuir elétricos restantes sem ultrapassar **2 por grupo**.
+5. completar vagas com mecânica, priorizando adicionar uma fase ainda não presente no grupo.
+6. para cada grupo completo, atribuir tema (t_g^*).
+
+### 6.3 melhoria local (swaps)
+
+rodar um procedimento de busca local por trocas entre pares de grupos:
+
+* escolher grupos (g_i,g_j) e alunos (a\in g_i), (b\in g_j)
+* propor swap (a\leftrightarrow b)
+* rejeitar imediatamente se algum grupo fica inválido
+* recalcular (t_{g_i}^*,t_{g_j}^*) e (\Delta E)
+* aceitar se (\Delta E<0) ou via recozimento simulado:
+
+[
+P(aceitar)=\exp(-\Delta E/T)
+]
+
+com (T) decaindo ao longo das iterações.
+
+resultado: solução fase 1 (({g}, {t_g})).
+
+---
+
+## 7. algoritmo fase 2 (ajuste social)
+
+### 7.1 entrada
+
+* solução fase 1 (grupos e temas)
+* matriz de afinidade observada (\Omega) com valores (A_{ij})
+
+### 7.2 objetivo
+
+reduzir o conflito/isolamento, preservando viabilidade e mantendo preferências tanto quanto possível.
+
+### 7.3 isolamento individual (explicação de “quem sai mais”)
+
+para aluno (i) em grupo (g):
+
+[
+S(i,g)=\sum_{j\in g,;j\neq i} A_{ij}
+]
+
+* (S) alto → aluno bem integrado.
+* (S) baixo/negativo → aluno com pouca afinidade, maior probabilidade de trocar.
+
+isso implementa a regra esperada: se 3 têm alta afinidade entre si e rejeição com 1, o 1 terá (S) muito baixo e tenderá a ser movido.
+
+### 7.4 mecanismo de otimização (swaps guiados)
+
+recomenda-se rodar busca local novamente, agora com energia incluindo (E_{soc}):
+
+1. (opcional) amostrar candidatos à troca com viés para baixos (S(i,g)). por exemplo, escolher um aluno (i) com probabilidade proporcional a (\exp(-S(i,g)/\tau)).
+2. escolher um segundo grupo e um aluno candidato (j).
+3. propor swap (i\leftrightarrow j).
+4. aplicar máscara dura: se algum grupo viola curso/fase/tamanho, rejeitar.
+5. recalcular temas ótimos (t_{g_i}^*,t_{g_j}^*) e (\Delta E) com termo social.
+6. aceitar se melhora ((\Delta E<0)) ou via recozimento simulado.
+
+### 7.5 por que ocorrem mudanças
+
+uma troca ocorre quando reduz a energia total, tipicamente por:
+
+* remover um aluno com (S(i,g)\ll 0) de um grupo onde ele é rejeitado por vários pares;
+* encaixar esse aluno em um grupo onde seus pares manifestados têm (A_{ij}>0);
+* mantendo regras duras e com perda pequena (ou ganho) em preferência de tema.
+
+---
+
+## 8. política para sobras e instâncias inviáveis
+
+### 8.1 sobras quando (N) não é múltiplo de 4
+
+definir antecipadamente uma política (implementação deve suportar):
+
+* **política a (recomendada)**: permitir exatamente um grupo de 3 ou de 5 e ajustar as regras de elétrica proporcionalmente.
+* **política b**: manter todos os grupos com 4 e deixar (r) alunos não alocados (lista de espera).
+* **política c**: executar com (G=\lceil N/4\rceil) e permitir um grupo incompleto temporário.
+
+### 8.2 quando (G \le n_E \le 2G) falha
+
+opções:
+
+* relaxar limite inferior (permitir 0 elétrica em poucos grupos) com penalidade alta.
+* relaxar limite superior (permitir 3 elétrica em poucos grupos) com penalidade alta.
+* permitir tamanho 5 para absorver excedente de elétrica.
+
+qualquer relaxamento deve ser configurável e auditável.
+
+---
+
+## 9. métricas e relatórios
+
+### 9.1 satisfação por preferência
+
+para aluno (a) no grupo com tema (t_g):
+
+[
+pos_a = pos_a(t_g)
+]
+
+métricas:
+
+[
+\text{top1}=\frac{1}{N'}\sum_a \mathbf{1}[pos_a=1],;
+\text{top2}=\frac{1}{N'}\sum_a \mathbf{1}[pos_a\le 2],;
+\text{top3}=\frac{1}{N'}\sum_a \mathbf{1}[pos_a\le 3]
+]
+
+[
+\overline{pos}=\frac{1}{N'}\sum_a pos_a
+]
+
+onde (N') é o número de alunos alocados.
+
+### 9.2 coesão social
+
+* energia social por grupo: (E_{soc}(g))
+* distribuição de (S(i,g)) (isolados)
+* número de swaps aceitos
+* estabilidade: (%) de alunos que permaneceram no mesmo grupo
+
+### 9.3 auditoria de regras
+
+* distribuição de elétricas por grupo
+* distribuição de fases distintas por grupo
+* (opcional) violações se políticas de relaxamento estiverem ativas
+
+---
+
+## 10. parâmetros recomendados
+
+a implementação deve expor parâmetros configuráveis:
+
+* pesos: (w_{pref}, w_{dup}, w_{div}, w_{soc})
+* número de iterações de melhoria local
+* temperatura inicial (T_0) e agenda de resfriamento
+* política de sobras (seção 8)
+* (opcional) capacidade por tema (cap_t)
+* regra de manifestação social: proporção esperada de (|\Omega|) e distribuição de (A_{ij})
+
+valores iniciais típicos (heurísticos):
+
+* (w_{pref}=1.0)
+* (w_{dup}=0.8) a (1.2)
+* (w_{div}=0.2) a (0.6)
+* (w_{soc}=0.5) a (2.0) (aumentar para forçar mais trocas)
+
+---
+
+## 11. formato de saída sugerido
+
+* tabela de grupos:
+
+  * id do grupo
+  * tema atribuído
+  * lista de membros (ids)
+  * contagem elétrica
+  * fases distintas
+  * métricas: soma de utilidade, energia social
+
+* tabela de alocação por aluno:
+
+  * id do aluno
+  * grupo
+  * tema
+  * posição no ranking
+  * (fase 2) (S(i,g))
+
+* log de mudanças (fase 2):
+
+  * swap realizado (aluno i ↔ aluno j)
+  * grupos origem/destino
+  * (\Delta E) total e decomposição (pref/fase/soc)
+  * motivo resumido: melhora de (S) do isolado, redução de conflitos
+
+---
+
+## 12. notas de implementação
+
+* complexidade: o núcleo é busca local por swaps. otimizações:
+
+  * recalcular energia apenas para grupos envolvidos no swap.
+  * pré-computar (\tilde u_{a,t}) e armazenar (A_{ij}) em estrutura esparsa (hashmap).
+* determinismo: usar seed para reprodutibilidade.
+* robustez: validar entradas (rankings completos, cursos válidos, fases válidas).
+
+---
+
+## 13. extensões opcionais
+
+* “espaço vetorial” explícito: embeddings de preferências + relaxação por forças (dinâmica). ainda assim, a etapa final deve respeitar máscara dura ao formar grupos.
+* formulação exata (ILP/CP-SAT) para prova de otimalidade em instâncias pequenas.
+* interface de coleta social: permitir atualização incremental de (A_{ij}) e re-rodar fase 2 sob demanda.

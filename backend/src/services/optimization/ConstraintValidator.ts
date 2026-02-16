@@ -1,4 +1,5 @@
 import { Group, ConstraintViolation } from '../../domain';
+import { ConstraintRules } from './SystemViabilityAnalyzer';
 
 /**
  * ConstraintValidator - Valida restrições em grupos
@@ -10,6 +11,20 @@ import { Group, ConstraintViolation } from '../../domain';
  * 4. DESEJÁVEL: Idealmente cada aluno de uma fase diferente
  */
 export class ConstraintValidator {
+  // Restrições dinâmicas (pode ser adaptado por AdaptiveConstraintManager)
+  private rules: ConstraintRules = {
+    minElectricalEngineers: 1,
+    maxElectricalEngineers: 2,
+    minPhaseDiversity: 2,
+    groupSize: 4
+  };
+
+  /**
+   * Define restrições dinâmicas (chamado por AdaptiveConstraintManager)
+   */
+  public setConstraintRules(rules: ConstraintRules): void {
+    this.rules = rules;
+  }
   /**
    * Valida um grupo e retorna lista de violações
    */
@@ -37,22 +52,22 @@ export class ConstraintValidator {
   }
 
   /**
-   * Valida composição de Eng. Elétrica
-   * Restrição: 1-2 alunos de EE por grupo
+   * Valida composição de Eng. Elétrica (dinâmica)
+   * Restrição: min-max alunos de EE por grupo (adaptável)
    */
   private validateElectricalComposition(group: Group): ConstraintViolation[] {
     const violations: ConstraintViolation[] = [];
     const composition = group.getComposition();
     const count = composition.electricalCount;
 
-    if (count < 1 || count > 2) {
+    if (count < this.rules.minElectricalEngineers || count > this.rules.maxElectricalEngineers) {
       violations.push({
         type: 'ELECTRICAL_COMPOSITION',
         severity: 'CRITICAL',
-        message: `Grupo deve ter 1-2 alunos de Eng. Elétrica, tem ${count}`,
+        message: `Grupo deve ter ${this.rules.minElectricalEngineers}-${this.rules.maxElectricalEngineers} alunos de Eng. Elétrica, tem ${count}`,
         affectedGroupId: group.id,
         details: {
-          expected: '1-2',
+          expected: `${this.rules.minElectricalEngineers}-${this.rules.maxElectricalEngineers}`,
           actual: count
         }
       });
@@ -62,22 +77,22 @@ export class ConstraintValidator {
   }
 
   /**
-   * Valida diversidade mínima de fases
-   * Restrição: MÍNIMO 2 fases diferentes
+   * Valida diversidade mínima de fases (dinâmica)
+   * Restrição: MÍNIMO N fases diferentes (adaptável)
    */
   private validateMinimumPhaseDiversity(group: Group): ConstraintViolation[] {
     const violations: ConstraintViolation[] = [];
     const composition = group.getComposition();
     const phaseCount = composition.phases.size;
 
-    if (phaseCount < 2) {
+    if (phaseCount < this.rules.minPhaseDiversity) {
       violations.push({
         type: 'PHASE_DIVERSITY',
         severity: 'CRITICAL',
-        message: `Grupo deve ter MÍNIMO 2 fases diferentes, tem ${phaseCount}`,
+        message: `Grupo deve ter MÍNIMO ${this.rules.minPhaseDiversity} fase(s) diferente(s), tem ${phaseCount}`,
         affectedGroupId: group.id,
         details: {
-          minimumRequired: 2,
+          minimumRequired: this.rules.minPhaseDiversity,
           actual: phaseCount,
           phases: Array.from(composition.phases)
         }

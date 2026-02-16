@@ -7,7 +7,7 @@ import { AuthService } from '../services/auth/AuthService';
  * Valida JWT e adiciona organizerId ao request
  */
 export function createAuthMiddleware(authService: AuthService) {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     try {
       // 1. Extrair token do header
       const token = authService.extractTokenFromHeader(
@@ -15,7 +15,7 @@ export function createAuthMiddleware(authService: AuthService) {
       );
 
       // 2. Validar token
-      const decoded = authService.verifyToken(token);
+      const decoded = await authService.verifyToken(token);
 
       // 3. Adicionar ao request
       (req as any).organizerId = decoded.organizerId;

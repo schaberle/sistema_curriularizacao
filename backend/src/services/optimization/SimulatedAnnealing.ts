@@ -1,6 +1,7 @@
 import { Student, Group, Solution, Theme } from '../../domain';
 import { ConstraintValidator } from './ConstraintValidator';
 import { EnergyCalculator } from './EnergyCalculator';
+import { ConstraintRules } from './SystemViabilityAnalyzer';
 
 /**
  * SimulatedAnnealing - Otimização global com aceitação probabilística
@@ -39,6 +40,13 @@ export class SimulatedAnnealing {
     if (initialTemp) this.initialTemperature = initialTemp;
     if (coolingRate) this.coolingRate = coolingRate;
     if (maxIterations) this.maxIterations = maxIterations;
+  }
+
+  /**
+   * Define restrições dinâmicas (chamado por DistributionEngine)
+   */
+  public setConstraintRules(rules: ConstraintRules): void {
+    this.validator.setConstraintRules(rules);
   }
 
   /**
@@ -105,14 +113,9 @@ export class SimulatedAnnealing {
       return null;
     }
 
-    // 70% chance de 2-opt swap, 30% chance de movimento
-    const useSwap = Math.random() < 0.7;
-
-    if (useSwap) {
-      return this.generateSwapNeighbor(solution);
-    } else {
-      return this.generateMoveNeighbor(solution);
-    }
+    // Usar apenas 2-opt swap (spec §6.3)
+    // Moves criam grupos de tamanhos desiguais, o que viola restrições duras
+    return this.generateSwapNeighbor(solution);
   }
 
   /**

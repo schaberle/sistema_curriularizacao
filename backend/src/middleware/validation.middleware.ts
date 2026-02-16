@@ -200,3 +200,47 @@ export function validateSearchQuery(req: Request, res: Response, next: NextFunct
 
   next();
 }
+
+/**
+ * Valida configuração de seed de dados de teste
+ */
+export function validateSeedConfig(req: Request, res: Response, next: NextFunction) {
+  if (req.body === null || typeof req.body !== 'object' || Array.isArray(req.body)) {
+    return res.status(400).json({
+      error: 'ValidaÃ§Ã£o falhou',
+      details: ['Payload de seed deve ser um objeto JSON'],
+    });
+  }
+
+  const { studentCount, generatePreferences, generateAffinities, affinityDensity } = req.body;
+  const errors: string[] = [];
+
+  if (studentCount !== undefined) {
+    if (!Number.isInteger(studentCount) || studentCount < 4 || studentCount > 500) {
+      errors.push('studentCount deve ser um inteiro entre 4 e 500');
+    }
+  }
+
+  if (generatePreferences !== undefined && typeof generatePreferences !== 'boolean') {
+    errors.push('generatePreferences deve ser boolean');
+  }
+
+  if (generateAffinities !== undefined && typeof generateAffinities !== 'boolean') {
+    errors.push('generateAffinities deve ser boolean');
+  }
+
+  if (affinityDensity !== undefined) {
+    if (typeof affinityDensity !== 'number' || affinityDensity < 0 || affinityDensity > 1) {
+      errors.push('affinityDensity deve ser um número entre 0 e 1');
+    }
+  }
+
+  if (errors.length > 0) {
+    return res.status(400).json({
+      error: 'Validação falhou',
+      details: errors,
+    });
+  }
+
+  next();
+}

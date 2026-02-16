@@ -184,6 +184,29 @@ export class Solution {
   }
 
   /**
+   * Obtém score médio de satisfação (preferências)
+   * Delega para os grupos calcularem
+   */
+  getAverageSatisfactionScore(): number {
+    if (this.groups.length === 0) return 0;
+
+    // Média ponderada pelo número de alunos seria mais preciso,
+    // mas média simples dos grupos é uma boa aproximação se grupos têm mesmo tamanho.
+    // Vamos fazer média de todos os alunos para ser exato.
+
+    let totalScore = 0;
+    let totalStudents = 0;
+
+    for (const group of this.groups) {
+      totalScore += group.getTotalSatisfactionScore();
+      totalStudents += group.getStudentCount();
+    }
+
+    if (totalStudents === 0) return 0;
+    return totalScore / totalStudents;
+  }
+
+  /**
    * Obtém score médio por aluno
    */
   getAverageScorePerStudent(): number {

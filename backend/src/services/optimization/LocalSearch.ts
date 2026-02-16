@@ -1,6 +1,7 @@
 import { Student, Group, Solution, Theme } from '../../domain';
 import { ConstraintValidator } from './ConstraintValidator';
 import { EnergyCalculator } from './EnergyCalculator';
+import { ConstraintRules } from './SystemViabilityAnalyzer';
 
 /**
  * LocalSearch - Refina uma solução através de buscas locais
@@ -22,10 +23,24 @@ export class LocalSearch {
   private energyCalculator: EnergyCalculator;
   private maxIterationsWithoutImprovement: number = 100;
   private themes: Theme[] = [];
+  private rules: ConstraintRules = {
+    minElectricalEngineers: 1,
+    maxElectricalEngineers: 2,
+    minPhaseDiversity: 2,
+    groupSize: 4
+  };
 
   constructor(energyCalculator?: EnergyCalculator) {
     this.validator = new ConstraintValidator();
     this.energyCalculator = energyCalculator || new EnergyCalculator();
+  }
+
+  /**
+   * Define restrições dinâmicas (chamado por DistributionEngine)
+   */
+  public setConstraintRules(rules: ConstraintRules): void {
+    this.rules = rules;
+    this.validator.setConstraintRules(rules);
   }
 
   /**
@@ -118,7 +133,7 @@ export class LocalSearch {
 
     // Energia ANTES
     const energyBefore = this.energyCalculator.calculateGroupEnergy(groupA, themeA) +
-                         this.energyCalculator.calculateGroupEnergy(groupB, themeB);
+      this.energyCalculator.calculateGroupEnergy(groupB, themeB);
 
     // Criar grupos APÓS troca
     const newGroupA = new Group(
@@ -137,7 +152,7 @@ export class LocalSearch {
 
     // Calcular energia DEPOIS do swap (pode precisar recalcular temas ótimos)
     let energyAfter = this.energyCalculator.calculateGroupEnergy(newGroupA, themeA) +
-                      this.energyCalculator.calculateGroupEnergy(newGroupB, themeB);
+      this.energyCalculator.calculateGroupEnergy(newGroupB, themeB);
 
     // Se algum grupo ficou inviável (energia infinita), rejeita
     if (!Number.isFinite(energyAfter)) {
@@ -182,16 +197,24 @@ export class LocalSearch {
   }
 
   /**
-   * Verifica viabilidade de um grupo (restrições duras)
+   * Verifica viabilidade de um grupo (restrições duras dinâmicas)
    */
   private isGroupFeasible(group: Group): boolean {
-    if (group.students.length !== 4) return false;
+    // Permite ±1 para grupos de sobra (N não múltiplo de groupSize)
+    const size = group.students.length;
+    const minSize = this.rules.groupSize - 1;
+    const maxSize = this.rules.groupSize + 1;
+    if (size < minSize || size > maxSize) return false;
 
     const electricalCount = group.students.filter(s => s.course === 'EE').length;
-    if (electricalCount < 1 || electricalCount > 2) return false;
+    const minEE = this.rules.minElectricalEngineers;
+    const maxEE = size >= this.rules.groupSize
+      ? this.rules.maxElectricalEngineers
+      : Math.min(this.rules.maxElectricalEngineers, size - 1);
+    if (electricalCount < minEE || electricalCount > maxEE) return false;
 
     const uniquePhases = new Set(group.students.map(s => s.phase)).size;
-    if (uniquePhases < 2) return false;
+    if (uniquePhases < this.rules.minPhaseDiversity) return false;
 
     return true;
   }

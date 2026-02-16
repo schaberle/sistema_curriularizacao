@@ -215,6 +215,7 @@ export class Student {
       course: this.course,
       phase: this.phase,
       preferences: this.preferences,
+      affinities: Object.fromEntries(this.affinities), // Converter Map para objeto
       groupId: this.groupId,
       createdAt: this.createdAt,
       updatedAt: this.updatedAt
@@ -226,9 +227,10 @@ export class Student {
    */
   static fromData(
     data: StudentData,
-    preferences: ThemePreference[] = []
+    preferences: ThemePreference[] = [],
+    affinities: { targetId: string, level: number }[] = []
   ): Student {
-    return new Student(
+    const student = new Student(
       data.id,
       data.name,
       data.course,
@@ -237,5 +239,49 @@ export class Student {
       new Date(data.created_at),
       new Date(data.updated_at)
     );
+
+    // Carregar afinidades
+    for (const aff of affinities) {
+      student.setAffinity(aff.targetId, aff.level);
+    }
+
+    return student;
+  }
+
+  // ========================================
+  // Gestão de Afinidade Social
+  // ========================================
+
+  /**
+   * Mapa de afinidades: targetStudentId -> level (-1 a 1)
+   */
+  affinities: Map<string, number> = new Map();
+
+  /**
+   * Define afinidade com outro aluno
+   * @param targetStudentId ID do aluno alvo
+   * @param level Nível de afinidade (-1: rejeição, 0: neutro, 1: afinidade)
+   */
+  setAffinity(targetStudentId: string, level: number): void {
+    if (targetStudentId === this.id) return; // Não pode ter afinidade consigo mesmo
+
+    // Normalizar level entre -1 e 1
+    const normalizedLevel = Math.max(-1, Math.min(1, level));
+    this.affinities.set(targetStudentId, normalizedLevel);
+  }
+
+  /**
+   * Obtém afinidade com outro aluno
+   * Retorna 0 se não houver declaração explícita
+   */
+  getAffinity(targetStudentId: string): number {
+    return this.affinities.get(targetStudentId) || 0;
+  }
+
+  /**
+   * Verifica se tem alguma afinidade declarada
+   */
+  hasAffinity(targetStudentId: string): boolean {
+    return this.affinities.has(targetStudentId);
   }
 }

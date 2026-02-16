@@ -1,9 +1,10 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ArrowRight, LayoutDashboard, Lock, Mail } from 'lucide-react';
 import { useAuthContext } from '../context/AuthContext';
 
 /**
- * LoginPage - Página de login para organizadores
+ * LoginPage - Pagina de login para organizadores
  */
 export function LoginPage() {
   const navigate = useNavigate();
@@ -13,12 +14,12 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setLocalError('');
 
     if (!email || !password) {
-      setLocalError('Email e senha são obrigatórios');
+      setLocalError('Email e senha sao obrigatorios');
       return;
     }
 
@@ -29,74 +30,72 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="bg-white rounded-lg shadow-xl p-8">
-          <h1 className="text-3xl font-bold text-center text-gray-900 mb-2">
-            🎓 Distribuição de Grupos
-          </h1>
-          <p className="text-center text-gray-600 mb-8">
-            Login para Organizadores
-          </p>
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,#eaf1ff_0%,#f8fafc_45%,#f8fafc_100%)] px-4 py-12 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-md animate-fade-in">
+        <div className="mb-8 text-center">
+          <div className="mx-auto mb-4 inline-flex rounded-2xl bg-[var(--brand-600)] p-3 text-white shadow-sm">
+            <LayoutDashboard className="h-7 w-7" />
+          </div>
+          <h1 className="text-3xl font-extrabold tracking-tight text-slate-900">Acesso do organizador</h1>
+          <p className="mt-2 text-sm text-slate-600">Entre para gerenciar distribuicoes e acompanhar os resultados.</p>
+        </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Email */}
+        <form onSubmit={handleSubmit} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label htmlFor="email" className="block text-sm font-medium text-slate-700">
                 Email
               </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition"
-                placeholder="seu@email.com"
-                disabled={loading}
-              />
+              <div className="relative mt-1">
+                <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 outline-none ring-[var(--brand-200)] focus:ring-2"
+                  placeholder="admin@exemplo.com"
+                  disabled={loading}
+                />
+              </div>
             </div>
 
-            {/* Password */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label htmlFor="password" className="block text-sm font-medium text-slate-700">
                 Senha
               </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition"
-                placeholder="••••••••"
-                disabled={loading}
-              />
+              <div className="relative mt-1">
+                <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 outline-none ring-[var(--brand-200)] focus:ring-2"
+                  placeholder="••••••••"
+                  disabled={loading}
+                />
+              </div>
             </div>
 
-            {/* Erro */}
             {(error || localError) && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+              <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                 {error || localError}
               </div>
             )}
 
-            {/* Submit */}
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition duration-200"
+              className="inline-flex w-full items-center justify-center rounded-xl bg-[var(--brand-600)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--brand-700)] disabled:opacity-60"
             >
-              {loading ? 'Entrando...' : 'Entrar'}
+              {loading ? 'Autenticando...' : 'Entrar'}
+              {!loading && <ArrowRight className="ml-2 h-4 w-4" />}
             </button>
-          </form>
-
-          <div className="mt-6 pt-6 border-t border-gray-200">
-            <p className="text-center text-sm text-gray-600">
-              Credenciais de teste:
-              <br />
-              Email: <code className="bg-gray-100 px-2 py-1 rounded">org@example.com</code>
-              <br />
-              Senha: <code className="bg-gray-100 px-2 py-1 rounded">senha123</code>
-            </p>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );

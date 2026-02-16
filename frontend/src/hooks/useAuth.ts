@@ -1,13 +1,9 @@
-import { useState, useCallback, useEffect } from 'react';
-import api from '../services/api';
+import { useState, useEffect } from 'react';
+import { Session } from '@supabase/supabase-js';
+import { supabase } from '../services/supabase';
 
 /**
- * Hook useAuth - Gerencia estado de autenticação
- *
- * Responsabilidades:
- * 1. Login/logout
- * 2. Verificar autenticação
- * 3. Armazenar token e organizerId
+ * Hook useAuth - Gerencia estado de autenticação via Supabase
  */
 
 export interface AuthState {
@@ -16,6 +12,7 @@ export interface AuthState {
   email: string | null;
   loading: boolean;
   error: string | null;
+  session: Session | null;
 }
 
 export function useAuth() {
@@ -25,20 +22,18 @@ export function useAuth() {
     email: null,
     loading: true,
     error: null,
+    session: null,
   });
 
-  // Verificar se já tem token ao carregar
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    const organizerId = localStorage.getItem('organizerId');
-
-    if (token && organizerId) {
+  const updateAuth = (session: Session | null) => {
+    if (session) {
       setAuth({
         isAuthenticated: true,
-        organizerId,
-        email: localStorage.getItem('email'),
+        organizerId: session.user.id,
+        email: session.user.email || null,
         loading: false,
         error: null,
+        session,
       });
     } else {
       setAuth({
@@ -47,54 +42,51 @@ export function useAuth() {
         email: null,
         loading: false,
         error: null,
+        session: null,
       });
     }
+  };
+
+  useEffect(() => {
+    // 1. Check active session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      updateAuth(session);
+    });
+
+    // 2. Listen for changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      updateAuth(session);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = async (email: string, password: string) => {
     try {
       setAuth((prev) => ({ ...prev, loading: true, error: null }));
 
-      const response = await api.login(email, password);
-
-      // Salvar token e info
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('organizerId', response.data.organizerId);
-      localStorage.setItem('email', response.data.email);
-
-      setAuth({
-        isAuthenticated: true,
-        organizerId: response.data.organizerId,
-        email: response.data.email,
-        loading: false,
-        error: null,
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
 
+      if (error) throw error;
       return true;
     } catch (error: any) {
-      const message = error.response?.data?.message || 'Erro ao fazer login';
       setAuth((prev) => ({
         ...prev,
         loading: false,
-        error: message,
+        error: error.message || 'Erro ao fazer login',
       }));
       return false;
     }
-  }, []);
+  };
 
-  const logout = useCallback(() => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('organizerId');
-    localStorage.removeItem('email');
-
-    setAuth({
-      isAuthenticated: false,
-      organizerId: null,
-      email: null,
-      loading: false,
-      error: null,
-    });
-  }, []);
+  const logout = async () => {
+    await supabase.auth.signOut();
+  };
 
   return {
     ...auth,
