@@ -264,8 +264,10 @@ Matriz simetrica de afinidade: $A_{ij}\in[-1,1]$.
 Coesao de grupo:
 
 $$
-cohesion(g)=\sum_{i,j\in g,\ i<j} A_{ij}
+cohesion(g)=\sum_{i=1}^{n_g-1}\sum_{j=i+1}^{n_g}A_{ij}
 $$
+
+com $n_g=|g|$.
 
 Energia social:
 
