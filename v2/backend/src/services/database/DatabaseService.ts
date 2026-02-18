@@ -2,6 +2,24 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Student, Theme, Group, Solution } from '../../domain';
 import { createResilientFetch } from '../supabase/resilientFetch';
 
+type StudentRegistryImportEntry = {
+  distributionId: string;
+  name: string;
+  nameNormalized: string;
+  course: string;
+  phase: number;
+  matriculaHash: string;
+  active?: boolean;
+};
+
+type StudentRegistryStatus = {
+  distributionId: string;
+  totalRows: number;
+  activeRows: number;
+  inactiveRows: number;
+  lastUpdatedAt: string | null;
+};
+
 /**
  * DatabaseService - Gerencia todas as operações com Supabase
  *
@@ -369,6 +387,25 @@ export class DatabaseService {
     return candidates[0];
   }
 
+  async findStudentsByExactProfile(
+    distributionId: string,
+    payload: { name: string; course: string; phase: number }
+  ): Promise<any[]> {
+    const normalizedName = this.normalizeNameForMatch(payload.name || '');
+    if (!normalizedName) {
+      return [];
+    }
+
+    const students = await this.getStudentsByDistribution(distributionId);
+    return students.filter((student: any) => {
+      return (
+        this.normalizeNameForMatch(String(student.name || '')) === normalizedName &&
+        String(student.course || '').toUpperCase() === String(payload.course || '').toUpperCase() &&
+        Number(student.phase) === Number(payload.phase)
+      );
+    });
+  }
+
   /**
    * Busca aluno por nome (para resultado público)
    */
@@ -556,6 +593,145 @@ export class DatabaseService {
     }
 
     return data || [];
+  }
+
+  // ============================================================
+  // STUDENT_REGISTRY - Registro oficial de alunos
+  // ============================================================
+
+  async upsertStudentRegistry(
+    entries: StudentRegistryImportEntry[]
+  ): Promise<{
+    importedRows: number;
+    activeRows: number;
+    deactivatedRows: number;
+  }> {
+    if (entries.length === 0) {
+      return {
+        importedRows: 0,
+        activeRows: 0,
+        deactivatedRows: 0,
+      };
+    }
+
+    const distributionId = entries[0].distributionId;
+    const nowIso = new Date().toISOString();
+
+    const { data: existingRows, error: existingError } = await this.client
+      .from('student_registry')
+      .select('id, matricula_hash, active')
+      .eq('distribution_id', distributionId);
+    if (existingError) {
+      throw existingError;
+    }
+
+    const incomingByHash = new Map<string, StudentRegistryImportEntry>();
+    for (const entry of entries) {
+      incomingByHash.set(entry.matriculaHash, entry);
+    }
+
+    const payload = Array.from(incomingByHash.values()).map((entry) => ({
+      distribution_id: entry.distributionId,
+      name: entry.name,
+      name_normalized: entry.nameNormalized,
+      course: entry.course,
+      phase: entry.phase,
+      matricula_hash: entry.matriculaHash,
+      active: entry.active ?? true,
+      updated_at: nowIso,
+    }));
+
+    const { error: upsertError } = await this.client
+      .from('student_registry')
+      .upsert(payload, { onConflict: 'distribution_id,matricula_hash' });
+    if (upsertError) {
+      throw upsertError;
+    }
+
+    const idsToDeactivate: string[] = [];
+    for (const row of existingRows || []) {
+      const hash = String(row.matricula_hash);
+      if (!incomingByHash.has(hash) && row.active) {
+        idsToDeactivate.push(String(row.id));
+      }
+    }
+
+    for (let i = 0; i < idsToDeactivate.length; i += 500) {
+      const batch = idsToDeactivate.slice(i, i + 500);
+      const { error: deactivateError } = await this.client
+        .from('student_registry')
+        .update({ active: false, updated_at: nowIso })
+        .in('id', batch);
+      if (deactivateError) {
+        throw deactivateError;
+      }
+    }
+
+    const { count: activeCount, error: activeCountError } = await this.client
+      .from('student_registry')
+      .select('id', { count: 'exact', head: true })
+      .eq('distribution_id', distributionId)
+      .eq('active', true);
+    if (activeCountError) {
+      throw activeCountError;
+    }
+
+    return {
+      importedRows: payload.length,
+      activeRows: Number(activeCount || 0),
+      deactivatedRows: idsToDeactivate.length,
+    };
+  }
+
+  async getStudentRegistryStatus(distributionId: string): Promise<StudentRegistryStatus> {
+    const { data, error } = await this.client
+      .from('student_registry')
+      .select('id, active, updated_at')
+      .eq('distribution_id', distributionId);
+    if (error) {
+      throw error;
+    }
+
+    const rows = data || [];
+    let activeRows = 0;
+    let lastUpdatedAt: string | null = null;
+    for (const row of rows) {
+      if (row.active) {
+        activeRows += 1;
+      }
+
+      const updatedAt = row.updated_at ? String(row.updated_at) : null;
+      if (updatedAt && (!lastUpdatedAt || updatedAt > lastUpdatedAt)) {
+        lastUpdatedAt = updatedAt;
+      }
+    }
+
+    return {
+      distributionId,
+      totalRows: rows.length,
+      activeRows,
+      inactiveRows: rows.length - activeRows,
+      lastUpdatedAt,
+    };
+  }
+
+  async findStudentRegistryByMatriculaHash(
+    distributionId: string,
+    matriculaHash: string
+  ): Promise<any | null> {
+    const { data, error } = await this.client
+      .from('student_registry')
+      .select('*')
+      .eq('distribution_id', distributionId)
+      .eq('matricula_hash', matriculaHash)
+      .eq('active', true)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+
+    return data || null;
   }
 
   // ============================================================

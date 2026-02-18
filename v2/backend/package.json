@@ -11,7 +11,8 @@
     "test:watch": "jest --watch",
     "test:unit": "jest --testPathPattern='(?<!e2e).*\\.test\\.ts$'",
     "test:e2e": "jest --testPathPattern='\\.e2e\\.test\\.ts$'",
-    "security:check": "ts-node src/security/checkSecurityPosture.ts"
+    "security:audit": "npm audit --omit=dev --audit-level=high",
+    "security:check": "ts-node src/security/checkSecurityPosture.ts && npm run security:audit"
   },
   "keywords": [],
   "author": "",
@@ -26,12 +27,11 @@
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.2.4",
-    "express-rate-limit": "^7.5.1",
     "express": "^5.2.1",
+    "express-rate-limit": "^7.5.1",
     "helmet": "^8.1.0",
     "joi": "^18.0.2",
     "jsonwebtoken": "^9.0.3",
-    "supabase": "^2.76.8",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },

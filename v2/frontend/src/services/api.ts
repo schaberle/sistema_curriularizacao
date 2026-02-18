@@ -34,7 +34,6 @@ import type {
  */
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4300';
-const STUDENT_SESSION_STORAGE_KEY = 'v2_student_session';
 
 type StudentSessionState = {
   accessToken: string;
@@ -59,37 +58,45 @@ function readCookie(name: string): string {
 
 function setStudentSessionState(next: StudentSessionState | null): void {
   studentSessionState = next;
-  if (next) {
-    sessionStorage.setItem(STUDENT_SESSION_STORAGE_KEY, JSON.stringify(next));
-  } else {
-    sessionStorage.removeItem(STUDENT_SESSION_STORAGE_KEY);
-  }
 }
 
 function loadStudentSessionState(): StudentSessionState | null {
-  if (studentSessionState) {
-    return studentSessionState;
-  }
-
-  const raw = sessionStorage.getItem(STUDENT_SESSION_STORAGE_KEY);
-  if (!raw) {
+  if (!studentSessionState) {
     return null;
   }
 
+  if (Date.now() >= Number(studentSessionState.expiresAtMs)) {
+    setStudentSessionState(null);
+    return null;
+  }
+
+  return studentSessionState;
+}
+
+function decodeStudentClaims(accessToken: string): {
+  studentId: string;
+  distributionId: string;
+} | null {
   try {
-    const parsed = JSON.parse(raw) as StudentSessionState;
-    if (!parsed?.accessToken || !parsed?.studentId || !parsed?.distributionId || !parsed?.expiresAtMs) {
-      setStudentSessionState(null);
+    const payloadBase64 = accessToken.split('.')[1];
+    if (!payloadBase64) {
       return null;
     }
 
-    if (Date.now() >= Number(parsed.expiresAtMs)) {
-      setStudentSessionState(null);
+    const payloadRaw = atob(payloadBase64.replace(/-/g, '+').replace(/_/g, '/'));
+    const payload = JSON.parse(payloadRaw) as {
+      student_id?: string;
+      distribution_id?: string;
+    };
+
+    if (!payload.student_id || !payload.distribution_id) {
       return null;
     }
 
-    studentSessionState = parsed;
-    return parsed;
+    return {
+      studentId: payload.student_id,
+      distributionId: payload.distribution_id,
+    };
   } catch {
     setStudentSessionState(null);
     return null;
@@ -516,7 +523,12 @@ class APIClient {
       const isStudentRequest = Boolean((config as any)?.meta?.studentAuth);
 
       if (isStudentRequest) {
-        const studentSession = loadStudentSessionState();
+        let studentSession = loadStudentSessionState();
+        if (!studentSession) {
+          await this.refreshStudentSession();
+          studentSession = loadStudentSessionState();
+        }
+
         if (studentSession?.accessToken) {
           config.headers = config.headers || {};
           config.headers.Authorization = `Bearer ${studentSession.accessToken}`;
@@ -628,15 +640,20 @@ class APIClient {
         }
       );
       const payload = response.data?.data;
-      const currentStudentSession = loadStudentSessionState();
-      if (!payload?.accessToken || !currentStudentSession) {
+      if (!payload?.accessToken) {
         return false;
       }
+
+      const claims = decodeStudentClaims(payload.accessToken);
+      if (!claims) {
+        return false;
+      }
+
       this.storeStudentSession({
         accessToken: payload.accessToken,
         accessTokenExpiresInSec: payload.accessTokenExpiresInSec,
-        studentId: currentStudentSession.studentId,
-        distributionId: currentStudentSession.distributionId,
+        studentId: payload.studentId || claims.studentId,
+        distributionId: payload.distributionId || claims.distributionId,
       });
       return true;
     } catch {
@@ -687,7 +704,7 @@ class APIClient {
 
   async createStudentSession(
     distributionId: string,
-    data: { name: string; course: string; phase: number }
+    data: { matricula?: string; name?: string; course?: string; phase?: number }
   ) {
     const response = await this.client.post(`/api/students/${distributionId}/session`, data);
     const payload = response.data?.data;
@@ -705,6 +722,16 @@ class APIClient {
   }
 
   async getCurrentStudentSession() {
+    const active = loadStudentSessionState();
+    if (active) {
+      return active;
+    }
+
+    const refreshed = await this.refreshStudentSession();
+    if (!refreshed) {
+      return null;
+    }
+
     return loadStudentSessionState();
   }
 
@@ -786,6 +813,24 @@ class APIClient {
 
   async createDistribution() {
     const response = await this.client.post('/api/organizer/distributions');
+    return response.data;
+  }
+
+  async importStudentRegistry(
+    distributionId: string,
+    payload: { students?: Array<{ name: string; course: 'EE' | 'ME'; phase: number; matricula: string }>; csv?: string }
+  ) {
+    const response = await this.client.post(
+      `/api/organizer/distributions/${distributionId}/student-registry/import`,
+      payload
+    );
+    return response.data;
+  }
+
+  async getStudentRegistryStatus(distributionId: string) {
+    const response = await this.client.get(
+      `/api/organizer/distributions/${distributionId}/student-registry/status`
+    );
     return response.data;
   }
 

@@ -1,13 +1,14 @@
-import { Router, Request, Response } from 'express';
+import { Request, Response, Router } from 'express';
+import { sendPublicError } from '../middleware/publicError.middleware';
 import { AuthService } from '../services/auth/AuthService';
 import { StudentSessionService } from '../services/auth/StudentSessionService';
 import { asyncHandler } from '../middleware/error.middleware';
 import { getRequestIp, getRequestUserAgent } from '../middleware/security.middleware';
 
 /**
- * Auth Routes - Rotas de Autenticação
- * 
- * Note: Login is now handled client-side via Supabase Auth.
+ * Auth Routes - Rotas de autenticacao
+ *
+ * Note: login de organizador e gerenciado no cliente via Supabase Auth.
  */
 export function createAuthRoutes(
   authService: AuthService,
@@ -17,19 +18,7 @@ export function createAuthRoutes(
 
   /**
    * GET /api/auth/verify
-   * Verifica validade do token (usado pelo frontend)
-   *
-   * Header:
-   * Authorization: Bearer eyJhbGc...
-   *
-   * Response 200:
-   * {
-   *   "valid": true,
-   *   "organizerId": "org_123",
-   *   "email": "org@example.com"
-   * }
-   *
-   * Response 401: Token inválido ou expirado
+   * Verifica validade do token de organizador.
    */
   router.get(
     '/verify',
@@ -41,15 +30,19 @@ export function createAuthRoutes(
 
         const decoded = await authService.verifyToken(token);
 
-        res.status(200).json({
+        return res.status(200).json({
           valid: true,
           organizerId: decoded.organizerId,
           email: decoded.email,
         });
-      } catch (error: any) {
-        res.status(401).json({
-          valid: false,
-          error: error.message,
+      } catch {
+        return sendPublicError(req, res, {
+          status: 401,
+          errorCode: 'AUTH_INVALID',
+          message: 'Token invalido ou expirado',
+          details: {
+            valid: false,
+          },
         });
       }
     })
@@ -82,18 +75,23 @@ export function createAuthRoutes(
           csrfToken: refreshed.csrfToken,
         });
 
+        const claims = studentSessionService.verifyAccessToken(refreshed.accessToken);
+
         return res.status(200).json({
           success: true,
           data: {
             accessToken: refreshed.accessToken,
             accessTokenExpiresInSec: refreshed.accessTokenExpiresInSec,
+            studentId: claims.student_id,
+            distributionId: claims.distribution_id,
           },
         });
-      } catch (error: any) {
+      } catch {
         studentSessionService.clearSessionCookies(res);
-        return res.status(401).json({
-          success: false,
-          error: error?.message || 'Nao foi possivel renovar a sessao',
+        return sendPublicError(req, res, {
+          status: 401,
+          errorCode: 'AUTH_INVALID',
+          message: 'Nao foi possivel renovar a sessao',
         });
       }
     })
@@ -109,9 +107,10 @@ export function createAuthRoutes(
       const csrfCookieToken = req.cookies?.[studentSessionService.csrfCookieName] || '';
       const csrfHeaderToken = String(req.headers['x-csrf-token'] || '');
       if (!csrfCookieToken || !csrfHeaderToken || csrfCookieToken !== csrfHeaderToken) {
-        return res.status(403).json({
-          success: false,
-          error: 'CSRF token invalido',
+        return sendPublicError(req, res, {
+          status: 403,
+          errorCode: 'VALIDATION_FAILED',
+          message: 'CSRF token invalido',
         });
       }
 

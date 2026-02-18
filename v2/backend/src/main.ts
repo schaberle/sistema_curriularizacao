@@ -6,12 +6,22 @@ import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 
 import { createAuthRoutes } from './routes/auth.routes';
+import { createOrganizerRegistryRoutes } from './routes/organizerRegistry.routes';
 import { createOrganizerRoutes } from './routes/organizer.routes';
 import { createPublicRoutes } from './routes/public.routes';
+import { createSecurityRoutes } from './routes/security.routes';
 import { createStudentRoutes } from './routes/student.routes';
 import { createThemeRoutes } from './routes/theme.routes';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
-import { createSecurityAuditMiddleware, requestIdMiddleware, structuredLoggingMiddleware } from './middleware/security.middleware';
+import {
+  publicErrorContractMiddleware,
+  sendPublicError,
+} from './middleware/publicError.middleware';
+import {
+  createSecurityAuditMiddleware,
+  requestIdMiddleware,
+  structuredLoggingMiddleware,
+} from './middleware/security.middleware';
 import { AuthService } from './services/auth/AuthService';
 import { StudentSessionService } from './services/auth/StudentSessionService';
 import { DatabaseService } from './services/database/DatabaseService';
@@ -22,6 +32,17 @@ function parseAllowedOrigins(raw: string): string[] {
   return raw
     .split(',')
     .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseCspConnectSources(raw: string | undefined): string[] {
+  if (!raw) {
+    return [];
+  }
+
+  return raw
+    .split(',')
+    .map((value) => value.trim())
     .filter(Boolean);
 }
 
@@ -60,8 +81,12 @@ async function initializeApp(): Promise<Application> {
   const jwtSecret = (process.env.JWT_SECRET || '').trim();
   const port = Number(process.env.PORT || 4300);
   const nodeEnv = (process.env.NODE_ENV || 'development').trim();
+  const isProduction = nodeEnv === 'production';
   const rawAllowedOrigins = process.env.CORS_ORIGIN || 'http://localhost:5174';
   const allowedOrigins = parseAllowedOrigins(rawAllowedOrigins);
+  const cspEnforce = String(process.env.CSP_ENFORCE || '').toLowerCase() === 'true';
+  const cspReportUri = String(process.env.CSP_REPORT_URI || '/api/security/csp-report').trim();
+  const cspConnectExtra = parseCspConnectSources(process.env.CSP_CONNECT_SRC);
 
   if (!supabaseUrl) {
     throw new Error('SUPABASE_URL obrigatoria');
@@ -70,20 +95,61 @@ async function initializeApp(): Promise<Application> {
   assertServiceKey(serviceKey);
   assertStrongJwtSecret(jwtSecret);
 
-  if (nodeEnv === 'production' && allowedOrigins.length === 0) {
+  if (isProduction && allowedOrigins.length === 0) {
     throw new Error('CORS_ORIGIN deve ser configurado em producao');
   }
+  if (isProduction && allowedOrigins.some((origin) => /localhost|127\.0\.0\.1/i.test(origin))) {
+    throw new Error('CORS_ORIGIN em producao nao pode conter localhost/127.0.0.1');
+  }
+
+  const cspConnectSrc = Array.from(
+    new Set([
+      "'self'",
+      ...allowedOrigins,
+      ...cspConnectExtra,
+      supabaseUrl,
+      supabaseUrl.replace(/^http/i, 'ws'),
+    ])
+  );
 
   app.use(requestIdMiddleware);
+  app.use(publicErrorContractMiddleware);
   app.use(structuredLoggingMiddleware);
 
   app.use(
     helmet({
-      hsts: nodeEnv === 'production',
+      hsts: isProduction,
       referrerPolicy: { policy: 'no-referrer' },
-      contentSecurityPolicy: false,
+      contentSecurityPolicy: {
+        useDefaults: false,
+        reportOnly: !cspEnforce,
+        directives: {
+          defaultSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          frameAncestors: ["'none'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:', 'blob:'],
+          fontSrc: ["'self'", 'data:'],
+          connectSrc: cspConnectSrc,
+          reportUri: [cspReportUri],
+        },
+      },
     })
   );
+
+  app.use((req: Request, res: Response, next) => {
+    res.setHeader(
+      'Report-To',
+      JSON.stringify({
+        group: 'csp-endpoint',
+        max_age: 10886400,
+        endpoints: [{ url: cspReportUri }],
+      })
+    );
+    next();
+  });
 
   app.use(
     cors({
@@ -105,12 +171,14 @@ async function initializeApp(): Promise<Application> {
     })
   );
 
-  if (nodeEnv === 'production') {
+  if (isProduction) {
     app.use((req: Request, res: Response, next) => {
       const forwardedProto = String(req.headers['x-forwarded-proto'] || '').toLowerCase();
       if (forwardedProto && forwardedProto !== 'https') {
-        return res.status(400).json({
-          error: 'HTTPS obrigatorio',
+        return sendPublicError(req, res, {
+          status: 400,
+          errorCode: 'VALIDATION_FAILED',
+          message: 'HTTPS obrigatorio',
         });
       }
 
@@ -118,7 +186,12 @@ async function initializeApp(): Promise<Application> {
     });
   }
 
-  app.use(express.json({ limit: '2mb' }));
+  app.use(
+    express.json({
+      limit: '2mb',
+      type: ['application/json', 'application/csp-report', 'application/reports+json'],
+    })
+  );
   app.use(express.urlencoded({ extended: true, limit: '2mb' }));
   app.use(cookieParser());
 
@@ -127,27 +200,48 @@ async function initializeApp(): Promise<Application> {
     max: 1200,
     standardHeaders: true,
     legacyHeaders: false,
+    handler: (req: Request, res: Response) =>
+      sendPublicError(req, res, {
+        status: 429,
+        errorCode: 'RATE_LIMITED',
+        message: 'Limite global de requisicoes excedido. Tente novamente em alguns minutos.',
+      }),
   });
   const authLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
     max: 80,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Muitas tentativas de autenticacao. Tente novamente em alguns minutos.' },
+    handler: (req: Request, res: Response) =>
+      sendPublicError(req, res, {
+        status: 429,
+        errorCode: 'RATE_LIMITED',
+        message: 'Muitas tentativas de autenticacao. Tente novamente em alguns minutos.',
+      }),
   });
   const studentWriteLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
     max: 240,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Limite de operacoes de aluno excedido. Aguarde para tentar novamente.' },
+    handler: (req: Request, res: Response) =>
+      sendPublicError(req, res, {
+        status: 429,
+        errorCode: 'RATE_LIMITED',
+        message: 'Limite de operacoes de aluno excedido. Aguarde para tentar novamente.',
+      }),
   });
   const searchLimiter = rateLimit({
     windowMs: 5 * 60 * 1000,
     max: 120,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Limite de consultas excedido. Aguarde para tentar novamente.' },
+    handler: (req: Request, res: Response) =>
+      sendPublicError(req, res, {
+        status: 429,
+        errorCode: 'RATE_LIMITED',
+        message: 'Limite de consultas excedido. Aguarde para tentar novamente.',
+      }),
   });
 
   app.use(globalLimiter);
@@ -174,14 +268,17 @@ async function initializeApp(): Promise<Application> {
       security: {
         rlsRequired: true,
         backendOnly: true,
+        cspMode: cspEnforce ? 'enforce' : 'report-only',
       },
     });
   });
 
+  app.use('/api/security', createSecurityRoutes(database));
   app.use('/api/auth', authLimiter, createAuthRoutes(authService, studentSessionService));
   app.use('/api/themes', createThemeRoutes(database, authService));
   app.use('/api/search', searchLimiter, createPublicRoutes(database));
   app.use('/api/students', studentWriteLimiter, createStudentRoutes(database, studentSessionService));
+  app.use('/api/organizer', createOrganizerRegistryRoutes(database, authService));
   app.use('/api/organizer', createOrganizerRoutes(database, authService));
 
   app.use(notFoundHandler);
@@ -197,6 +294,7 @@ async function initializeApp(): Promise<Application> {
           nodeEnv,
           allowedOrigins,
           supabaseUrl,
+          cspMode: cspEnforce ? 'enforce' : 'report-only',
           timestamp: new Date().toISOString(),
         })
       );

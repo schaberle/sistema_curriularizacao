@@ -1,8 +1,9 @@
-import { Request, Response, NextFunction } from 'express';
+import { NextFunction, Request, Response } from 'express';
+import { sendPublicError } from './publicError.middleware';
 import { AuthService } from '../services/auth/AuthService';
 
 /**
- * Middleware de Autenticação
+ * Middleware de Autenticacao
  *
  * Valida JWT e adiciona organizerId ao request
  */
@@ -17,7 +18,9 @@ export function createAuthMiddleware(authService: AuthService) {
 
       next();
     } catch (error: any) {
-      const errorText = `${String(error?.message || '')} ${String(error?.cause?.message || '')} ${String(error?.code || error?.cause?.code || '')}`.toLowerCase();
+      const errorText =
+        `${String(error?.message || '')} ${String(error?.cause?.message || '')} ${String(error?.code || error?.cause?.code || '')}`.toLowerCase();
+
       const transientAuthFailure =
         error?.name === 'AuthNetworkError' ||
         errorText.includes('fetch failed') ||
@@ -27,30 +30,31 @@ export function createAuthMiddleware(authService: AuthService) {
         errorText.includes('network');
 
       if (transientAuthFailure) {
-        return res.status(503).json({
-          error: 'Serviço de autenticação indisponível',
-          message: 'Falha transitória de rede ao validar token. Tente novamente.',
+        return sendPublicError(req, res, {
+          status: 503,
+          errorCode: 'SERVICE_UNAVAILABLE',
+          message: 'Servico de autenticacao indisponivel. Tente novamente.',
         });
       }
 
-      res.status(401).json({
-        error: 'Não autorizado',
-        message: error.message,
+      return sendPublicError(req, res, {
+        status: 401,
+        errorCode: 'AUTH_INVALID',
+        message: 'Nao autorizado',
       });
     }
   };
 }
 
 /**
- * Middleware para extrair organizerId do request (após autenticação)
+ * Middleware para extrair organizerId do request (apos autenticacao)
  */
 export function getOrganizerIdFromRequest(req: Request): string {
   const organizerId = (req as any).organizerId;
 
   if (!organizerId) {
-    throw new Error('Organizador não autenticado');
+    throw new Error('Organizador nao autenticado');
   }
 
   return organizerId;
 }
-

@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from 'express';
+import { sendPublicError } from './publicError.middleware';
 import { DatabaseService } from '../services/database/DatabaseService';
 import { StudentSessionService } from '../services/auth/StudentSessionService';
 
@@ -34,8 +35,10 @@ export function createStudentAuthMiddleware(
 
       const student = await databaseService.getStudent(claims.student_id);
       if (!student || student.distribution_id !== claims.distribution_id) {
-        return res.status(401).json({
-          error: 'Sessao de aluno invalida',
+        return sendPublicError(req, res, {
+          status: 401,
+          errorCode: 'AUTH_INVALID',
+          message: 'Sessao de aluno invalida',
         });
       }
 
@@ -46,10 +49,11 @@ export function createStudentAuthMiddleware(
       };
 
       next();
-    } catch (error: any) {
-      return res.status(401).json({
-        error: 'Nao autorizado',
-        message: error?.message || 'Token invalido',
+    } catch {
+      return sendPublicError(req, res, {
+        status: 401,
+        errorCode: 'AUTH_INVALID',
+        message: 'Nao autorizado',
       });
     }
   };
@@ -67,4 +71,3 @@ export function getStudentAuthFromRequest(req: Request): {
 
   return auth;
 }
-
