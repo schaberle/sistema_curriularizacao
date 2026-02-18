@@ -157,11 +157,16 @@ $$
 
 ### 2) Energia de grupo (fase 1)
 
+Se o grupo for inviavel:
+
 $$
-\begin{aligned}
-E_{grupo}(g,t) &= \infty && \text{se } g \text{ for inviavel} \\
-E_{grupo}(g,t) &= E_{pref}(g,t)+E_{fase}(g) && \text{caso contrario}
-\end{aligned}
+E_{grupo}(g,t)=\infty
+$$
+
+Se o grupo for viavel:
+
+$$
+E_{grupo}(g,t)=E_{pref}(g,t)+E_{fase}(g)
 $$
 
 #### 2.1 Componente de preferencia
@@ -212,21 +217,19 @@ groupSize-1 \le |g| \le groupSize+1,\quad groupSize=4
 $$
 
 $$
-EE(g)\ge \operatorname{minEE},\quad EE(g)\le \operatorname{maxEE}_{\mathrm{aj}}(g)
+EE(g)\ge minEE,\quad EE(g)\le maxEE_{aj}(g)
 $$
 
 $$
-\operatorname{maxEE}_{\mathrm{aj}}(g)=
-\left\{
-\begin{array}{ll}
-\operatorname{maxEE}, & |g|\ge \operatorname{groupSize} \\
-\min(\operatorname{maxEE},|g|-1), & |g|<\operatorname{groupSize}
-\end{array}
-\right.
+maxEE_{aj}(g)=maxEE,\quad |g|\ge groupSize
 $$
 
 $$
-\left|\operatorname{phases}(g)\right|\ge \operatorname{minPhaseDiversity}
+maxEE_{aj}(g)=\min(maxEE,|g|-1),\quad |g|<groupSize
+$$
+
+$$
+|phases(g)|\ge minPhaseDiversity
 $$
 
 Defaults: `minEE=1`, `maxEE=2`, `minPhaseDiversity=2`.
@@ -261,13 +264,13 @@ Matriz simetrica de afinidade: $A_{ij}\in[-1,1]$.
 Coesao de grupo:
 
 $$
-\operatorname{cohesion}(g)=\sum_{\substack{i,j\in g\\i<j}} A_{ij}
+cohesion(g)=\sum_{i,j\in g,\ i<j} A_{ij}
 $$
 
 Energia social:
 
 $$
-E_{\mathrm{soc}}(g)=-w_{\mathrm{soc}}\cdot \operatorname{cohesion}(g)
+E_{soc}(g)=-w_{soc}\cdot cohesion(g)
 $$
 
 Default: $w_{soc}=1.0$.
@@ -275,7 +278,7 @@ Default: $w_{soc}=1.0$.
 Objetivo da fase 2:
 
 $$
-E_{\mathrm{fase2}}=\sum_{g\in G}\left(E_{grupo}(g,\tau(g))+E_{\mathrm{soc}}(g)\right)
+E_{fase2}=\sum_{g\in G}\left(E_{grupo}(g,\tau(g))+E_{soc}(g)\right)
 $$
 
 Selecao guiada por isolamento:
