@@ -63,6 +63,8 @@ export function createOrganizerRoutes(database, authService) {
     };
     const simulationExecutionMetaByDistribution = new Map();
     const simulationRunManager = new SimulationRuntime_1.SimulationRunManager();
+    const simulationStreamTickets = new Map();
+    const SIMULATION_STREAM_TICKET_TTL_MS = 60 * 1000;
     const seedInFlightByDistribution = new Set();
     const SIMULATION_ENERGY_AXIS = ['-E_pref', '-E_fase', '-E_soc'];
     const normalizeAffinityLevel = (rawValue) => {
@@ -204,6 +206,35 @@ export function createOrganizerRoutes(database, authService) {
         res.write(`event: ${type}\n`);
         res.write(`data: ${JSON.stringify(payload)}\n\n`);
     };
+    const issueSimulationStreamTicket = (runId, organizerId) => {
+        const now = Date.now();
+        for (const [ticketId, ticketData] of simulationStreamTickets.entries()) {
+            if (ticketData.expiresAtMs <= now) {
+                simulationStreamTickets.delete(ticketId);
+            }
+        }
+        const ticket = `ssetk_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+        simulationStreamTickets.set(ticket, {
+            runId,
+            organizerId,
+            expiresAtMs: now + SIMULATION_STREAM_TICKET_TTL_MS,
+        });
+        return ticket;
+    };
+    const validateSimulationStreamTicket = (ticket, runId) => {
+        const record = simulationStreamTickets.get(ticket);
+        if (!record) {
+            return null;
+        }
+        if (record.expiresAtMs <= Date.now()) {
+            simulationStreamTickets.delete(ticket);
+            return null;
+        }
+        if (record.runId !== runId) {
+            return null;
+        }
+        return record.organizerId;
+    };
     const serializeSimulationRunResult = (run, result) => ({
         runId: run.id,
         distributionId: run.distributionId,
@@ -231,7 +262,6 @@ export function createOrganizerRoutes(database, authService) {
         catch (error) {
             res.status(500).json({
                 error: 'Erro ao listar distribuições',
-                message: error.message,
             });
         }
     }));
@@ -268,7 +298,6 @@ export function createOrganizerRoutes(database, authService) {
         catch (error) {
             res.status(500).json({
                 error: 'Erro ao criar distribuição',
-                message: error.message,
             });
         }
     }));
@@ -344,7 +373,6 @@ export function createOrganizerRoutes(database, authService) {
         catch (error) {
             res.status(500).json({
                 error: 'Erro ao criar temas',
-                message: error.message,
             });
         }
     }));
@@ -388,7 +416,6 @@ export function createOrganizerRoutes(database, authService) {
         catch (error) {
             res.status(500).json({
                 error: 'Erro ao marcar pendencia de execucao',
-                message: error.message,
             });
         }
     }));
@@ -499,7 +526,6 @@ export function createOrganizerRoutes(database, authService) {
         catch (error) {
             res.status(500).json({
                 error: 'Erro ao executar distribuição',
-                message: error.message,
             });
         }
     }));
@@ -565,7 +591,6 @@ export function createOrganizerRoutes(database, authService) {
         catch (error) {
             res.status(500).json({
                 error: 'Erro ao buscar resultados',
-                message: error.message,
             });
         }
     }));
@@ -694,7 +719,6 @@ export function createOrganizerRoutes(database, authService) {
             await database.updateDistributionStatus(distributionId, 'FAILED').catch(() => { });
             res.status(500).json({
                 error: 'Erro ao executar Fase 1',
-                message: error.message,
             });
         }
     }));
@@ -852,7 +876,6 @@ export function createOrganizerRoutes(database, authService) {
             console.error('[execute-phase2] Error:', error);
             res.status(500).json({
                 error: 'Erro ao executar Fase 2',
-                message: error.message,
             });
         }
     }));
@@ -954,7 +977,6 @@ export function createOrganizerRoutes(database, authService) {
             await database.updateDistributionStatus(distributionId, 'FAILED').catch(() => { });
             res.status(500).json({
                 error: 'Erro ao executar Fase 1 de simulação',
-                message: error.message,
             });
         }
     }));
@@ -1077,7 +1099,6 @@ export function createOrganizerRoutes(database, authService) {
             await database.updateDistributionStatus(distributionId, 'FAILED').catch(() => { });
             res.status(500).json({
                 error: 'Erro ao executar Fase 2 de simulação',
-                message: error.message,
             });
         }
     }));
@@ -1326,19 +1347,45 @@ export function createOrganizerRoutes(database, authService) {
             }
         })();
     }));
+    router.post('/simulation/runs/:runId/stream-ticket', authMiddleware, (0, error_middleware_1.asyncHandler)(async (req, res) => {
+        const organizerId = req.user.organizerId;
+        const runId = req.params.runId;
+        const run = simulationRunManager.getRun(runId);
+        if (!run) {
+            return res.status(404).json({
+                error: 'Execucao de simulacao nao encontrada',
+            });
+        }
+        if (run.organizerId !== organizerId) {
+            return res.status(403).json({
+                error: 'Sem permissao para acompanhar esta execucao',
+            });
+        }
+        const ticket = issueSimulationStreamTicket(runId, organizerId);
+        return res.status(200).json({
+            success: true,
+            data: {
+                ticket,
+                expiresInSec: Math.floor(SIMULATION_STREAM_TICKET_TTL_MS / 1000),
+            },
+        });
+    }));
     router.get('/simulation/runs/:runId/stream', async (req, res) => {
         try {
             const runId = req.params.runId;
-            const token = String(req.query?.access_token || '');
-            if (!token) {
-                return res.status(401).json({ error: 'Token de acesso ausente para stream SSE' });
+            const ticket = String(req.query?.ticket || '');
+            if (!ticket) {
+                return res.status(401).json({ error: 'Ticket de stream ausente' });
             }
-            const decoded = await authService.verifyToken(token);
+            const organizerIdFromTicket = validateSimulationStreamTicket(ticket, runId);
+            if (!organizerIdFromTicket) {
+                return res.status(401).json({ error: 'Ticket de stream invalido ou expirado' });
+            }
             const run = simulationRunManager.getRun(runId);
             if (!run) {
                 return res.status(404).json({ error: 'Execução de simulação não encontrada' });
             }
-            if (run.organizerId !== decoded.organizerId) {
+            if (run.organizerId !== organizerIdFromTicket) {
                 return res.status(403).json({ error: 'Você não tem permissão para acompanhar esta execução' });
             }
             setRunSseHeaders(res);
@@ -1370,7 +1417,6 @@ export function createOrganizerRoutes(database, authService) {
             if (!res.headersSent) {
                 return res.status(401).json({
                     error: 'Não autorizado para acessar stream da simulação',
-                    message: error.message,
                 });
             }
             res.end();
@@ -1429,7 +1475,6 @@ export function createOrganizerRoutes(database, authService) {
             console.error('[simulation/metrics] Error:', error);
             res.status(500).json({
                 error: 'Erro ao buscar métricas de simulação',
-                message: error.message,
             });
         }
     }));
@@ -1471,7 +1516,6 @@ export function createOrganizerRoutes(database, authService) {
             console.error('[simulation/groups] Error:', error);
             res.status(500).json({
                 error: 'Erro ao buscar grupos da simulação',
-                message: error.message,
             });
         }
     }));
@@ -1518,7 +1562,6 @@ export function createOrganizerRoutes(database, authService) {
             console.error('[simulation/visual-state] Error:', error);
             res.status(500).json({
                 error: 'Erro ao buscar estado visual da simulação',
-                message: error.message,
             });
         }
     }));
@@ -1592,7 +1635,6 @@ export function createOrganizerRoutes(database, authService) {
             console.error('[social-config] Error:', error);
             res.status(500).json({
                 error: 'Erro ao atualizar configuração de Fase 2',
-                message: error.message,
             });
         }
     }));
@@ -1677,7 +1719,6 @@ export function createOrganizerRoutes(database, authService) {
             console.error('[social-metrics] Error:', error);
             res.status(500).json({
                 error: 'Erro ao buscar métricas sociais',
-                message: error.message,
             });
         }
     }));
@@ -1745,7 +1786,6 @@ export function createOrganizerRoutes(database, authService) {
             console.error('[statistics] Error:', error);
             res.status(500).json({
                 error: 'Erro ao buscar estatísticas',
-                message: error.message,
             });
         }
     }));
@@ -1837,7 +1877,6 @@ export function createOrganizerRoutes(database, authService) {
             console.error('[seed] Error:', error);
             res.status(500).json({
                 error: 'Erro ao gerar dados de teste',
-                message: error.message,
             });
         }
     }));
@@ -1889,7 +1928,6 @@ export function createOrganizerRoutes(database, authService) {
             console.error('[seed-affinities] Error:', error);
             res.status(500).json({
                 error: 'Erro ao gerar dados de afinidade',
-                message: error.message,
             });
         }
     }));
@@ -1956,7 +1994,6 @@ export function createOrganizerRoutes(database, authService) {
             console.error('[groups] Error:', error);
             res.status(500).json({
                 error: 'Erro ao buscar grupos',
-                message: error.message,
             });
         }
     }));

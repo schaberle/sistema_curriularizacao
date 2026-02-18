@@ -34,11 +34,12 @@ export function structuredLoggingMiddleware(req: Request, res: Response, next: N
 
   res.on('finish', () => {
     const durationMs = Date.now() - startedAt;
+    const safePath = `${req.baseUrl || ''}${req.path || ''}` || req.path || '/';
     const payload = {
       level: 'info',
       requestId: (req as any).requestId || null,
       method: req.method,
-      path: req.originalUrl || req.url,
+      path: safePath,
       statusCode: res.statusCode,
       durationMs,
       ipAddress,
@@ -68,10 +69,11 @@ export function createSecurityAuditMiddleware(databaseService: DatabaseService) 
       }
 
       try {
+        const safePath = `${req.baseUrl || ''}${req.path || ''}` || req.path || '/';
         await databaseService.logSecurityAuditEvent({
           actorType: 'anonymous',
           eventType: 'http_response',
-          path: req.originalUrl || req.url,
+          path: safePath,
           method: req.method,
           statusCode,
           ipAddress: getRequestIp(req),
@@ -88,4 +90,3 @@ export function createSecurityAuditMiddleware(databaseService: DatabaseService) 
     next();
   };
 }
-

@@ -1,52 +1,60 @@
 import { Router, Request, Response } from 'express';
 import { DatabaseService } from '../services/database/DatabaseService';
+import { AuthService } from '../services/auth/AuthService';
 import { asyncHandler } from '../middleware/error.middleware';
 
 /**
- * Theme Routes - Rotas de Temas (Públicas)
+ * Theme Routes
+ *
+ * Restrito a organizador autenticado com escopo da distribuicao.
  */
-export function createThemeRoutes(database: DatabaseService): Router {
-    const router = Router();
+export function createThemeRoutes(database: DatabaseService, authService: AuthService): Router {
+  const router = Router();
 
-    /**
-     * GET /api/themes/:distributionId
-     */
-    router.get(
-        '/:distributionId',
-        asyncHandler(async (req: Request, res: Response) => {
-            try {
-                const distributionId = req.params.distributionId as string;
+  router.get(
+    '/:distributionId',
+    asyncHandler(async (req: Request, res: Response) => {
+      const distributionId = req.params.distributionId as string;
 
-                // Verificar se distribuição existe
-                const distribution = await database.getDistribution(distributionId);
-                if (!distribution) {
-                    return res.status(404).json({
-                        error: 'Distribuição não encontrada',
-                    });
-                }
+      let organizerId = '';
+      try {
+        const token = authService.extractTokenFromHeader(req.headers.authorization);
+        const decoded = await authService.verifyToken(token);
+        organizerId = decoded.organizerId;
+      } catch {
+        return res.status(401).json({
+          error: 'Autenticacao obrigatoria',
+        });
+      }
 
-                // Buscar temas
-                const themes = await database.getThemesByDistribution(distributionId);
+      const canAccess = await authService.canAccessDistribution(organizerId, distributionId);
+      if (!canAccess) {
+        return res.status(403).json({
+          error: 'Sem permissao para acessar os temas desta distribuicao',
+        });
+      }
 
-                res.status(200).json({
-                    success: true,
-                    data: {
-                        themes: themes.map((t: any) => ({
-                            id: t.id,
-                            name: t.name,
-                            description: t.description,
-                            maxGroups: t.max_groups,
-                        })),
-                    },
-                });
-            } catch (error: any) {
-                res.status(500).json({
-                    error: 'Erro ao buscar temas',
-                    message: error.message,
-                });
-            }
-        })
-    );
+      try {
+        const themes = await database.getThemesByDistribution(distributionId);
 
-    return router;
+        return res.status(200).json({
+          success: true,
+          data: {
+            themes: themes.map((t: any) => ({
+              id: t.id,
+              name: t.name,
+              description: t.description,
+              maxGroups: t.max_groups,
+            })),
+          },
+        });
+      } catch {
+        return res.status(500).json({
+          error: 'Erro ao buscar temas',
+        });
+      }
+    })
+  );
+
+  return router;
 }

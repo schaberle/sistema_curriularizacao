@@ -49,7 +49,7 @@ export function AffinityInputPage() {
         }
 
         const [accessResponse, studentResponse] = await Promise.all([
-          api.getStudentDistributionAccess(distributionId),
+          api.getStudentAccess(),
           api.getStudentMe(),
         ]);
 

@@ -687,7 +687,7 @@ class APIClient {
 
   async createStudentSession(
     distributionId: string,
-    data: { studentId?: string; name: string; course: string; phase: number }
+    data: { name: string; course: string; phase: number }
   ) {
     const response = await this.client.post(`/api/students/${distributionId}/session`, data);
     const payload = response.data?.data;
@@ -741,71 +741,19 @@ class APIClient {
     return response.data;
   }
 
-  async getStudent(studentId: string) {
-    const response = await this.client.get(`/api/students/${studentId}`);
+  async getStudentAccess() {
+    const response = await this.client.get('/api/students/me/access', this.studentRequestConfig());
     return response.data;
   }
 
-  async getStudentDistributionAccess(distributionId: string) {
-    try {
-      const response = await this.client.get(`/api/students/distribution/${distributionId}/access`);
-      return response.data;
-    } catch (error: any) {
-      const status = error?.response?.status;
-      const message = String(error?.response?.data?.error || '').toLowerCase();
-      const routeMissing =
-        status === 404 &&
-        (message.includes('rota nÃ£o encontrada') ||
-          message.includes('rota nao encontrada') ||
-          message.includes('route not found'));
+  async getStudentThemes() {
+    const response = await this.client.get('/api/students/me/themes', this.studentRequestConfig());
+    return response.data;
+  }
 
-      // Compatibilidade com backend antigo sem endpoint de access:
-      // infere um estado minimo para evitar abrir cadastro quando ja ha resultados.
-      if (routeMissing) {
-        let themesConfigured = false;
-        let resultsAvailable = false;
-
-        try {
-          const themesResponse = await this.client.get(`/api/themes/${distributionId}`);
-          const themes = themesResponse?.data?.data?.themes;
-          themesConfigured = Array.isArray(themes) && themes.length > 0;
-        } catch {
-          // Mantem fallback conservador.
-        }
-
-        try {
-          const probe = `__access_probe__${Date.now()}`;
-          await this.client.get('/api/search', {
-            params: { name: probe, distributionId },
-          });
-          resultsAvailable = true;
-        } catch (searchError: any) {
-          const searchStatus = searchError?.response?.status;
-          if (searchStatus !== 403) {
-            // Em caso de erro inesperado, mantemos a inferencia fechada.
-            resultsAvailable = false;
-          }
-        }
-
-        const inferredAccess = {
-          distributionId,
-          status: 'UNKNOWN',
-          themesConfigured,
-          groupsCreated: resultsAvailable,
-          registrationOpen: themesConfigured && !resultsAvailable,
-          resultsAvailable,
-          affinitiesOpen: resultsAvailable,
-          phase2Executed: false,
-        };
-
-        return {
-          success: true,
-          data: inferredAccess,
-        };
-      }
-
-      throw error;
-    }
+  // Mantido apenas para compatibilidade temporaria.
+  async getStudentDistributionAccess(_distributionId: string) {
+    return this.getStudentAccess();
   }
 
   async searchAffinityCandidates(query: string) {
@@ -824,20 +772,6 @@ class APIClient {
     const response = await this.client.get(
       `/api/themes/${distributionId}`
     );
-    return response.data;
-  }
-
-  // ============================================================
-  // SEARCH (PUBLIC)
-  // ============================================================
-
-  async searchStudent(name: string, distributionId: string) {
-    const response = await this.client.get('/api/search', {
-      params: {
-        name,
-        distributionId,
-      },
-    });
     return response.data;
   }
 
@@ -964,6 +898,13 @@ class APIClient {
   async getSimulationRunResult(runId: string) {
     const response = await this.client.get(
       `/api/organizer/simulation/runs/${runId}/result`
+    );
+    return response.data;
+  }
+
+  async getSimulationRunStreamTicket(runId: string) {
+    const response = await this.client.post(
+      `/api/organizer/simulation/runs/${runId}/stream-ticket`
     );
     return response.data;
   }
@@ -1289,13 +1230,9 @@ export async function openSimulationRunStream(
     onError?: (event: Event) => void;
   }
 ): Promise<EventSource> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) {
-    throw new Error('Sessao expirada. FaÃ§a login novamente.');
-  }
-
-  const streamUrl = `${API_URL}/api/organizer/simulation/runs/${runId}/stream?access_token=${encodeURIComponent(token)}`;
+  const ticketResponse = (await api.getSimulationRunStreamTicket(runId)) as LegacyResponse<{ ticket: string }>;
+  const ticketData = ensureSuccess(ticketResponse, 'Falha ao obter ticket para stream da simulacao');
+  const streamUrl = `${API_URL}/api/organizer/simulation/runs/${runId}/stream?ticket=${encodeURIComponent(ticketData.ticket)}`;
   const source = new EventSource(streamUrl);
 
   source.addEventListener('run_started', (event) => {

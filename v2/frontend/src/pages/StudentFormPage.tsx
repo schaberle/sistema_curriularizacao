@@ -1,8 +1,7 @@
-﻿import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, BookOpen, GraduationCap, Layers, Search, User } from 'lucide-react';
+import { ArrowRight, BookOpen, GraduationCap, Layers, User } from 'lucide-react';
 import api from '../services/api';
-import { StudentDistributionAccess } from '../types/student.types';
 
 /**
  * StudentFormPage - Pagina para aluno registrar dados basicos
@@ -15,27 +14,7 @@ export function StudentFormPage() {
   const [course, setCourse] = useState<'EE' | 'ME'>('EE');
   const [phase, setPhase] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [accessLoading, setAccessLoading] = useState(true);
-  const [access, setAccess] = useState<StudentDistributionAccess | null>(null);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    const loadAccess = async () => {
-      if (!distributionId) return;
-
-      try {
-        setAccessLoading(true);
-        const response = await api.getStudentDistributionAccess(distributionId);
-        setAccess(response.data || null);
-      } catch (err: any) {
-        setError(err.response?.data?.error || 'Nao foi possivel carregar o acesso da distribuicao');
-      } finally {
-        setAccessLoading(false);
-      }
-    };
-
-    loadAccess();
-  }, [distributionId]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -48,7 +27,7 @@ export function StudentFormPage() {
 
     try {
       setLoading(true);
-      const response = await api.registerStudent(distributionId, name, course, phase);
+      await api.registerStudent(distributionId, name, course, phase);
       navigate(`/student/preferences/${distributionId}`);
     } catch (err: any) {
       setError(err.response?.data?.error || err.response?.data?.message || 'Erro ao registrar');
@@ -56,43 +35,6 @@ export function StudentFormPage() {
       setLoading(false);
     }
   };
-
-  if (accessLoading) {
-    return (
-      <div className="min-h-screen bg-[radial-gradient(circle_at_top,#eaf1ff_0%,#f8fafc_45%,#f8fafc_100%)] px-4 py-10 sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-lg items-center justify-center rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-sm text-slate-600">Carregando status da distribuicao...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (access && !access.registrationOpen) {
-    return (
-      <div className="min-h-screen bg-[radial-gradient(circle_at_top,#eaf1ff_0%,#f8fafc_45%,#f8fafc_100%)] px-4 py-10 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-lg animate-fade-in rounded-2xl border border-amber-200 bg-white p-6 shadow-sm">
-          <div className="mb-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-            <div>
-              <p className="font-semibold">Cadastro fechado</p>
-              <p className="mt-1 text-sm">O cadastro de novos alunos esta encerrado para esta distribuicao.</p>
-            </div>
-          </div>
-
-          {access.resultsAvailable && (
-            <button
-              type="button"
-              onClick={() => navigate(`/student/result/${distributionId}`)}
-              className="inline-flex items-center rounded-xl bg-[var(--brand-600)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--brand-700)]"
-            >
-              <Search className="mr-2 h-4 w-4" />
-              Consultar resultado
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,#eaf1ff_0%,#f8fafc_45%,#f8fafc_100%)] px-4 py-10 sm:px-6 lg:px-8">

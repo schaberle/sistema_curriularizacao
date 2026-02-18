@@ -179,7 +179,7 @@ async function initializeApp(): Promise<Application> {
   });
 
   app.use('/api/auth', authLimiter, createAuthRoutes(authService, studentSessionService));
-  app.use('/api/themes', createThemeRoutes(database));
+  app.use('/api/themes', createThemeRoutes(database, authService));
   app.use('/api/search', searchLimiter, createPublicRoutes(database));
   app.use('/api/students', studentWriteLimiter, createStudentRoutes(database, studentSessionService));
   app.use('/api/organizer', createOrganizerRoutes(database, authService));
@@ -215,4 +215,3 @@ if (require.main === module) {
 }
 
 export default initializeApp;
-

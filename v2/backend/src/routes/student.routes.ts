@@ -74,7 +74,7 @@ async function createStudentSessionResponse(
       actorType: 'student',
       actorId: student.id,
       eventType: 'student_session_issued',
-      path: req.originalUrl,
+      path: `${req.baseUrl || ''}${req.path || ''}` || req.path || '/api/students/session',
       method: req.method,
       statusCode: 201,
       ipAddress: getRequestIp(req),
@@ -113,19 +113,10 @@ export function createStudentRoutes(
 
   router.get(
     '/distribution/:distributionId/access',
-    asyncHandler(async (req: Request, res: Response) => {
-      const distributionId = req.params.distributionId as string;
-      const distribution = await database.getDistribution(distributionId);
-      if (!distribution) {
-        return res.status(404).json({
-          error: 'Distribuicao nao encontrada',
-        });
-      }
-
-      const access = await database.getStudentAccessState(distributionId);
-      return res.status(200).json({
-        success: true,
-        data: access,
+    asyncHandler(async (_req: Request, res: Response) => {
+      return res.status(410).json({
+        error: 'Endpoint descontinuado',
+        message: 'Use GET /api/students/me/access com sessao de aluno',
       });
     })
   );
@@ -180,8 +171,7 @@ export function createStudentRoutes(
     '/:distributionId/session',
     asyncHandler(async (req: Request, res: Response) => {
       const distributionId = req.params.distributionId as string;
-      const { studentId, name, course, phase } = req.body as {
-        studentId?: string;
+      const { name, course, phase } = req.body as {
         name: string;
         course: string;
         phase: number;
@@ -201,7 +191,6 @@ export function createStudentRoutes(
       }
 
       const student = await database.findStudentForSession(distributionId, {
-        studentId,
         name,
         course,
         phase,
@@ -242,6 +231,40 @@ export function createStudentRoutes(
           phase: student.phase,
           distributionId: student.distribution_id,
           preferences,
+        },
+      });
+    })
+  );
+
+  router.get(
+    '/me/access',
+    studentAuthMiddleware,
+    asyncHandler(async (req: Request, res: Response) => {
+      const studentAuth = getStudentAuthFromRequest(req);
+      const access = await database.getStudentAccessState(studentAuth.distributionId);
+      return res.status(200).json({
+        success: true,
+        data: access,
+      });
+    })
+  );
+
+  router.get(
+    '/me/themes',
+    studentAuthMiddleware,
+    asyncHandler(async (req: Request, res: Response) => {
+      const studentAuth = getStudentAuthFromRequest(req);
+      const themes = await database.getThemesByDistribution(studentAuth.distributionId);
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          themes: themes.map((t: any) => ({
+            id: t.id,
+            name: t.name,
+            description: t.description,
+            maxGroups: t.max_groups,
+          })),
         },
       });
     })
@@ -515,176 +538,47 @@ export function createStudentRoutes(
   );
 
   /**
-   * Endpoints legados de leitura mantidos para compatibilidade de consulta publica.
+   * Endpoints legados de leitura descontinuados para evitar exposicao por identificadores.
    */
   router.get(
     '/:studentId',
-    asyncHandler(async (req: Request, res: Response) => {
-      const studentId = req.params.studentId as string;
-      const student = await database.getStudent(studentId);
-      if (!student) {
-        return res.status(404).json({
-          error: 'Aluno nao encontrado',
-        });
-      }
-
-      const preferences = await database.getStudentPreferences(studentId);
-      return res.status(200).json({
-        success: true,
-        data: {
-          id: student.id,
-          name: student.name,
-          course: student.course,
-          phase: student.phase,
-          preferences,
-        },
+    asyncHandler(async (_req: Request, res: Response) => {
+      return res.status(410).json({
+        error: 'Endpoint descontinuado',
+        message: 'Use GET /api/students/me com sessao de aluno',
       });
     })
   );
 
   router.get(
     '/:studentId/current-group',
-    asyncHandler(async (req: Request, res: Response) => {
-      const studentId = req.params.studentId as string;
-      const student = await database.getStudent(studentId);
-      if (!student) {
-        return res.status(404).json({
-          error: 'Aluno nao encontrado',
-        });
-      }
-
-      const access = await database.getStudentAccessState(student.distribution_id);
-      if (!access.resultsAvailable) {
-        return res.status(403).json({
-          error: getAccessMessage(access, 'results'),
-          data: access,
-        });
-      }
-
-      const groupData = await database.getStudentGroup(studentId, student.distribution_id);
-      if (!groupData) {
-        return res.status(404).json({
-          error: 'Aluno ainda nao esta em um grupo',
-          message: 'Fase 1 ainda nao foi executada',
-        });
-      }
-
-      const memberIds = await database.getGroupStudents(groupData.id);
-      const members: any[] = [];
-      for (const memberId of memberIds) {
-        const memberData = await database.getStudent(memberId);
-        if (memberData) {
-          members.push({
-            id: memberData.id,
-            name: memberData.name,
-            course: memberData.course,
-            phase: memberData.phase,
-          });
-        }
-      }
-
-      const themeData = await database.getTheme(groupData.theme_id);
-      return res.status(200).json({
-        success: true,
-        data: {
-          groupId: groupData.id,
-          themeId: groupData.theme_id,
-          themeName: themeData?.name || 'N/A',
-          members,
-        },
+    asyncHandler(async (_req: Request, res: Response) => {
+      return res.status(410).json({
+        error: 'Endpoint descontinuado',
+        message: 'Use GET /api/students/me/current-group com sessao de aluno',
       });
     })
   );
 
   router.get(
     '/:studentId/affinities',
-    asyncHandler(async (req: Request, res: Response) => {
-      const studentId = req.params.studentId as string;
-      const student = await database.getStudent(studentId);
-      if (!student) {
-        return res.status(404).json({
-          error: 'Aluno nao encontrado',
-        });
-      }
-
-      const access = await database.getStudentAccessState(student.distribution_id);
-      if (!access.affinitiesOpen) {
-        return res.status(403).json({
-          error: getAccessMessage(access, 'affinities'),
-          data: access,
-        });
-      }
-
-      const affinitiesData = await database.getStudentAffinities(studentId);
-      const affinities = affinitiesData.map((aff: any) => ({
-        targetStudentId: aff.target_student_id || aff.targetStudentId,
-        affinityValue: Math.round(
-          toNormalizedAffinity(aff.level !== undefined ? aff.level : (aff.affinity_value_raw || 0)) * 100
-        ),
-        normalizedValue: toNormalizedAffinity(aff.level !== undefined ? aff.level : (aff.affinity_value_raw || 0)),
-      }));
-
-      return res.status(200).json({
-        success: true,
-        data: {
-          studentId,
-          affinities,
-        },
+    asyncHandler(async (_req: Request, res: Response) => {
+      return res.status(410).json({
+        error: 'Endpoint descontinuado',
+        message: 'Use GET /api/students/me/affinities com sessao de aluno',
       });
     })
   );
 
   router.get(
     '/:studentId/affinity-candidates',
-    asyncHandler(async (req: Request, res: Response) => {
-      const studentId = req.params.studentId as string;
-      const query = String(req.query.q || '').trim();
-      if (!query || query.length < 2) {
-        return res.status(200).json({
-          success: true,
-          data: { candidates: [] },
-        });
-      }
-
-      const student = await database.getStudent(studentId);
-      if (!student) {
-        return res.status(404).json({
-          error: 'Aluno nao encontrado',
-        });
-      }
-
-      const access = await database.getStudentAccessState(student.distribution_id);
-      if (!access.affinitiesOpen) {
-        return res.status(403).json({
-          error: getAccessMessage(access, 'affinities'),
-          data: access,
-        });
-      }
-
-      const currentGroup = await database.getStudentGroup(studentId, student.distribution_id);
-      const currentGroupMemberIds = currentGroup ? await database.getGroupStudents(currentGroup.id) : [];
-      const excludeIds = Array.from(new Set([studentId, ...currentGroupMemberIds]));
-      const candidates = await database.searchStudentsByDistribution(
-        student.distribution_id,
-        query,
-        excludeIds,
-        30
-      );
-
-      return res.status(200).json({
-        success: true,
-        data: {
-          candidates: candidates.map((candidate: any) => ({
-            id: candidate.id,
-            name: candidate.name,
-            course: candidate.course,
-            phase: candidate.phase,
-          })),
-        },
+    asyncHandler(async (_req: Request, res: Response) => {
+      return res.status(410).json({
+        error: 'Endpoint descontinuado',
+        message: 'Use GET /api/students/me/affinity-candidates com sessao de aluno',
       });
     })
   );
 
   return router;
 }
-

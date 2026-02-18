@@ -1,42 +1,25 @@
-﻿import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AlertTriangle, BookOpen, CheckCircle, Heart, Layers, Search, User, Users } from 'lucide-react';
 import api from '../services/api';
 import { StudentDistributionAccess } from '../types/student.types';
 
 /**
- * StudentResultPage - Pagina publica para aluno buscar seu resultado
+ * StudentResultPage - Consulta de resultado via sessao autenticada de aluno
  */
 export function StudentResultPage() {
   const { distributionId } = useParams<{ distributionId: string }>();
   const navigate = useNavigate();
 
   const [name, setName] = useState('');
+  const [course, setCourse] = useState<'EE' | 'ME'>('EE');
+  const [phase, setPhase] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState('');
   const [result, setResult] = useState<any>(null);
   const [searched, setSearched] = useState(false);
   const [access, setAccess] = useState<StudentDistributionAccess | null>(null);
   const [startingAffinitySession, setStartingAffinitySession] = useState(false);
-
-  useEffect(() => {
-    const loadAccess = async () => {
-      if (!distributionId) return;
-
-      try {
-        setInitialLoading(true);
-        const response = await api.getStudentDistributionAccess(distributionId);
-        setAccess(response.data || null);
-      } catch (err: any) {
-        setError(err.response?.data?.error || 'Nao foi possivel carregar dados da distribuicao');
-      } finally {
-        setInitialLoading(false);
-      }
-    };
-
-    loadAccess();
-  }, [distributionId]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,43 +28,68 @@ export function StudentResultPage() {
     setSearched(true);
 
     if (!name || !distributionId) {
-      setError('Digite seu nome');
-      return;
-    }
-
-    if (access && !access.resultsAvailable) {
-      setError('Resultados ainda nao foram liberados para esta distribuicao.');
+      setError('Preencha nome, curso e fase');
       return;
     }
 
     try {
       setLoading(true);
-      const response = await api.searchStudent(name, distributionId);
 
-      if (response.found) {
-        setResult(response.data);
-      } else {
-        setError(response.message || 'Aluno nao encontrado');
+      await api.createStudentSession(distributionId, {
+        name,
+        course,
+        phase,
+      });
+
+      const [accessResponse, meResponse] = await Promise.all([
+        api.getStudentAccess(),
+        api.getStudentMe(),
+      ]);
+
+      const accessData = accessResponse.data as StudentDistributionAccess;
+      setAccess(accessData);
+
+      if (!accessData.resultsAvailable) {
+        setError('Resultados ainda nao foram liberados para esta distribuicao.');
+        return;
       }
+
+      let groupData: any = null;
+      let groupMessage = '';
+
+      try {
+        const groupResponse = await api.getStudentCurrentGroup();
+        groupData = groupResponse.data || null;
+      } catch (groupErr: any) {
+        groupMessage = groupErr?.message || 'Aluno ainda nao foi alocado a um grupo';
+      }
+
+      const me = meResponse.data || {};
+      setResult({
+        studentName: me.name,
+        course: me.course,
+        phase: me.phase,
+        group: groupData,
+        message: groupMessage,
+      });
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Erro ao buscar resultado');
+      setError(err?.message || 'Erro ao consultar resultado');
     } finally {
       setLoading(false);
     }
   };
 
   const handleOpenAffinities = async () => {
-    if (!distributionId || !result?.studentId) {
+    if (!distributionId || !name || !course || !phase) {
       return;
     }
 
     try {
       setStartingAffinitySession(true);
       await api.createStudentSession(distributionId, {
-        studentId: result.studentId,
-        name: result.studentName,
-        course: result.course,
-        phase: result.phase,
+        name,
+        course,
+        phase,
       });
       navigate(`/student/affinities/${distributionId}`);
     } catch (err: any) {
@@ -91,14 +99,6 @@ export function StudentResultPage() {
     }
   };
 
-  if (initialLoading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center py-12 px-4">
-        <p className="text-slate-600">Carregando status da distribuicao...</p>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6 lg:px-8 font-sans">
       <div className="max-w-3xl mx-auto">
@@ -107,15 +107,8 @@ export function StudentResultPage() {
             <Search className="h-6 w-6 text-blue-600" />
           </div>
           <h1 className="text-3xl font-bold text-slate-900">Consultar resultado</h1>
-          <p className="mt-2 text-slate-600">Busque por seu nome para visualizar seu grupo atribuido</p>
+          <p className="mt-2 text-slate-600">Informe seus dados para abrir uma sessao e consultar seu grupo.</p>
         </div>
-
-        {!access?.resultsAvailable && (
-          <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-800">
-            <p className="font-medium">Resultados ainda nao liberados</p>
-            <p className="text-sm mt-1">A distribuicao ainda nao concluiu a Fase 1.</p>
-          </div>
-        )}
 
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-8 mb-8">
           <form onSubmit={handleSearch} className="space-y-4">
@@ -131,8 +124,40 @@ export function StudentResultPage() {
                   onChange={(e) => setName(e.target.value)}
                   className="block w-full pl-10 sm:text-sm border-slate-300 rounded-md focus:ring-blue-500 focus:border-blue-500 p-2.5 border"
                   placeholder="Ex: Joao Silva"
-                  disabled={loading || !access?.resultsAvailable}
+                  disabled={loading}
+                  required
                 />
+              </div>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Curso</label>
+                <select
+                  value={course}
+                  onChange={(e) => setCourse(e.target.value as 'EE' | 'ME')}
+                  className="block w-full sm:text-sm border-slate-300 rounded-md focus:ring-blue-500 focus:border-blue-500 p-2.5 border"
+                  disabled={loading}
+                >
+                  <option value="EE">Engenharia Eletrica (EE)</option>
+                  <option value="ME">Engenharia Mecanica (ME)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Fase</label>
+                <select
+                  value={phase}
+                  onChange={(e) => setPhase(Number.parseInt(e.target.value, 10))}
+                  className="block w-full sm:text-sm border-slate-300 rounded-md focus:ring-blue-500 focus:border-blue-500 p-2.5 border"
+                  disabled={loading}
+                >
+                  {Array.from({ length: 10 }, (_, index) => (
+                    <option key={index + 1} value={index + 1}>
+                      Fase {index + 1}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -145,10 +170,10 @@ export function StudentResultPage() {
 
             <button
               type="submit"
-              disabled={loading || !access?.resultsAvailable}
+              disabled={loading}
               className="w-full flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 transition-colors"
             >
-              {loading ? 'Consultando...' : 'Buscar agora'}
+              {loading ? 'Consultando...' : 'Abrir sessao e consultar'}
             </button>
           </form>
         </div>
@@ -157,7 +182,7 @@ export function StudentResultPage() {
           <div className="bg-white rounded-lg shadow-md border border-slate-200 overflow-hidden">
             <div className="border-b border-slate-200 bg-green-50 px-6 py-4 flex items-center">
               <CheckCircle className="h-6 w-6 text-green-600 mr-3" />
-              <h2 className="text-lg font-medium text-green-800">Aluno encontrado</h2>
+              <h2 className="text-lg font-medium text-green-800">Sessao validada</h2>
             </div>
 
             <div className="p-8">
@@ -195,7 +220,6 @@ export function StudentResultPage() {
                     <div className="bg-blue-50 rounded-lg p-5 border border-blue-100">
                       <p className="text-xs text-blue-600 font-semibold uppercase">Tema</p>
                       <p className="font-bold text-slate-900">{result.group.themeName}</p>
-                      <p className="text-sm text-slate-600 mt-2">{result.group.themeDescription}</p>
 
                       {typeof result.group.socialCohesionScore === 'number' && (
                         <p className="mt-3 text-sm text-slate-700">
@@ -207,6 +231,12 @@ export function StudentResultPage() {
                 )}
               </div>
 
+              {!result.group && result.message && (
+                <div className="mb-8 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-800 text-sm">
+                  {result.message}
+                </div>
+              )}
+
               {result.group?.members && (
                 <div>
                   <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-100 pb-2 flex items-center">
@@ -217,14 +247,14 @@ export function StudentResultPage() {
                     {result.group.members.map((member: any, index: number) => (
                       <div key={index} className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
                         <p className="font-semibold text-slate-900 text-sm">{member.name}</p>
-                        <p className="text-xs text-slate-500 mt-1">{member.course} • {member.phase}a fase</p>
+                        <p className="text-xs text-slate-500 mt-1">{member.course} - {member.phase}a fase</p>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {result.studentId && distributionId && access?.affinitiesOpen && (
+              {distributionId && access?.affinitiesOpen && (
                 <div className="mt-8 rounded-lg border border-rose-200 bg-rose-50 p-4">
                   <p className="text-sm text-rose-900">A coleta de afinidades esta aberta para esta distribuicao.</p>
                   <button
@@ -239,7 +269,7 @@ export function StudentResultPage() {
                 </div>
               )}
 
-              {result.studentId && distributionId && access?.phase2Executed && (
+              {distributionId && access?.phase2Executed && (
                 <div className="mt-8 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
                   Coleta de afinidades encerrada apos execucao da Fase 2.
                 </div>

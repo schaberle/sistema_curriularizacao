@@ -68,7 +68,7 @@ export function StudentPreferencesPage() {
 
         await api.getStudentMe();
 
-        const accessResponse = await api.getStudentDistributionAccess(distributionId);
+        const accessResponse = await api.getStudentAccess();
         const accessData = accessResponse.data as StudentDistributionAccess;
         setAccess(accessData);
 
@@ -77,7 +77,7 @@ export function StudentPreferencesPage() {
           return;
         }
 
-        const themesResponse = await api.getThemes(distributionId);
+        const themesResponse = await api.getStudentThemes();
         const loadedThemes = (themesResponse.data.themes || []) as Theme[];
 
         setThemes(loadedThemes);

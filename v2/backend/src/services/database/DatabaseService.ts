@@ -346,32 +346,15 @@ export class DatabaseService {
    */
   async findStudentForSession(
     distributionId: string,
-    payload: { studentId?: string; name: string; course: string; phase: number }
+    payload: { name: string; course: string; phase: number }
   ): Promise<any | null> {
     const normalizedName = this.normalizeNameForMatch(payload.name || '');
     if (!normalizedName) {
       return null;
     }
 
-    if (payload.studentId) {
-      const student = await this.getStudent(payload.studentId);
-      if (!student || student.distribution_id !== distributionId) {
-        return null;
-      }
-
-      if (
-        this.normalizeNameForMatch(String(student.name || '')) !== normalizedName ||
-        String(student.course || '').toUpperCase() !== String(payload.course || '').toUpperCase() ||
-        Number(student.phase) !== Number(payload.phase)
-      ) {
-        return null;
-      }
-
-      return student;
-    }
-
     const students = await this.getStudentsByDistribution(distributionId);
-    const candidate = students.find((student: any) => {
+    const candidates = students.filter((student: any) => {
       return (
         this.normalizeNameForMatch(String(student.name || '')) === normalizedName &&
         String(student.course || '').toUpperCase() === String(payload.course || '').toUpperCase() &&
@@ -379,7 +362,11 @@ export class DatabaseService {
       );
     });
 
-    return candidate || null;
+    if (candidates.length !== 1) {
+      return null;
+    }
+
+    return candidates[0];
   }
 
   /**
