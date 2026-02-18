@@ -11,21 +11,12 @@
 !README.md
 !package.json
 
-# Keep setup scripts
-!scripts/
-!scripts/**
-
 # Keep active app (v2)
 !v2/
 !v2/backend/
 !v2/backend/**
 !v2/frontend/
 !v2/frontend/**
-
-# Keep database migrations
-!supabase/
-!supabase/migrations/
-!supabase/migrations/**
 
 # -------------------------
 # Re-ignore generated files
