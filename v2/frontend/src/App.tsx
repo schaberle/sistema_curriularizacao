@@ -41,8 +41,8 @@ function App() {
 
               {/* Alunos */}
               <Route path="/student/form/:distributionId" element={<StudentFormPage />} />
-              <Route path="/student/:studentId/preferences/:distributionId" element={<StudentPreferencesPage />} />
-              <Route path="/student/:studentId/affinities/:distributionId" element={<AffinityInputPage />} />
+              <Route path="/student/preferences/:distributionId" element={<StudentPreferencesPage />} />
+              <Route path="/student/affinities/:distributionId" element={<AffinityInputPage />} />
               <Route path="/student/result/:distributionId" element={<StudentResultPage />} />
 
               {/* Organizadores */}

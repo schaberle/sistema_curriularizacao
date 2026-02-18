@@ -41,7 +41,7 @@ function compareThemesByRating(a: Theme, b: Theme, ratings: Record<string, numbe
  * StudentPreferencesPage - Pagina para aluno avaliar temas
  */
 export function StudentPreferencesPage() {
-  const { studentId, distributionId } = useParams<{ studentId: string; distributionId: string }>();
+  const { distributionId } = useParams<{ distributionId: string }>();
   const navigate = useNavigate();
 
   const [themes, setThemes] = useState<Theme[]>([]);
@@ -60,6 +60,13 @@ export function StudentPreferencesPage() {
       try {
         setLoading(true);
         setError('');
+        const activeSession = await api.getCurrentStudentSession();
+        if (!activeSession || activeSession.distributionId !== distributionId) {
+          setError('Sessao de aluno ausente ou invalida. Faca novo cadastro para continuar.');
+          return;
+        }
+
+        await api.getStudentMe();
 
         const accessResponse = await api.getStudentDistributionAccess(distributionId);
         const accessData = accessResponse.data as StudentDistributionAccess;
@@ -127,7 +134,7 @@ export function StudentPreferencesPage() {
   };
 
   const handleSubmit = async () => {
-    if (!studentId || !distributionId) {
+    if (!distributionId) {
       setError('Parametros invalidos');
       return;
     }
@@ -152,7 +159,7 @@ export function StudentPreferencesPage() {
         rank: index + 1,
       }));
 
-      await api.updateStudentPreferences(studentId, prefsData);
+      await api.updateStudentPreferences(prefsData);
       setSubmitSuccess(true);
     } catch (err: any) {
       setError(err.response?.data?.error || err.response?.data?.message || 'Erro ao salvar preferencias');

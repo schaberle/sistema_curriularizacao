@@ -342,6 +342,47 @@ export class DatabaseService {
   }
 
   /**
+   * Busca aluno para inicializar sessao com validacao de identidade basica.
+   */
+  async findStudentForSession(
+    distributionId: string,
+    payload: { studentId?: string; name: string; course: string; phase: number }
+  ): Promise<any | null> {
+    const normalizedName = this.normalizeNameForMatch(payload.name || '');
+    if (!normalizedName) {
+      return null;
+    }
+
+    if (payload.studentId) {
+      const student = await this.getStudent(payload.studentId);
+      if (!student || student.distribution_id !== distributionId) {
+        return null;
+      }
+
+      if (
+        this.normalizeNameForMatch(String(student.name || '')) !== normalizedName ||
+        String(student.course || '').toUpperCase() !== String(payload.course || '').toUpperCase() ||
+        Number(student.phase) !== Number(payload.phase)
+      ) {
+        return null;
+      }
+
+      return student;
+    }
+
+    const students = await this.getStudentsByDistribution(distributionId);
+    const candidate = students.find((student: any) => {
+      return (
+        this.normalizeNameForMatch(String(student.name || '')) === normalizedName &&
+        String(student.course || '').toUpperCase() === String(payload.course || '').toUpperCase() &&
+        Number(student.phase) === Number(payload.phase)
+      );
+    });
+
+    return candidate || null;
+  }
+
+  /**
    * Busca aluno por nome (para resultado público)
    */
   async getStudentByName(name: string, distributionId: string): Promise<any | null> {
@@ -1106,6 +1147,124 @@ export class DatabaseService {
       affinitiesOpen,
       phase2Executed,
     };
+  }
+
+  // ============================================================
+  // STUDENT_SESSIONS - Sessao JWT de Aluno
+  // ============================================================
+
+  async createStudentSessionRecord(input: {
+    studentId: string;
+    distributionId: string;
+    refreshTokenHash: string;
+    csrfTokenHash: string;
+    expiresAt: string;
+    ipAddress: string;
+    userAgent: string;
+  }): Promise<void> {
+    const { error } = await this.client
+      .from('student_sessions')
+      .insert({
+        student_id: input.studentId,
+        distribution_id: input.distributionId,
+        refresh_token_hash: input.refreshTokenHash,
+        csrf_token_hash: input.csrfTokenHash,
+        expires_at: input.expiresAt,
+        ip_address: input.ipAddress,
+        user_agent: input.userAgent,
+      });
+
+    if (error) {
+      throw error;
+    }
+  }
+
+  async getStudentSessionByRefreshHash(refreshTokenHash: string): Promise<any | null> {
+    const { data, error } = await this.client
+      .from('student_sessions')
+      .select('*')
+      .eq('refresh_token_hash', refreshTokenHash)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+
+    return data || null;
+  }
+
+  async revokeStudentSessionByRefreshHash(
+    refreshTokenHash: string,
+    reason: string,
+    replacedByHash?: string
+  ): Promise<void> {
+    const payload: Record<string, unknown> = {
+      revoked_at: new Date().toISOString(),
+      revoke_reason: reason,
+    };
+
+    if (replacedByHash) {
+      payload.replaced_by_hash = replacedByHash;
+    }
+
+    const { error } = await this.client
+      .from('student_sessions')
+      .update(payload)
+      .eq('refresh_token_hash', refreshTokenHash)
+      .is('revoked_at', null);
+
+    if (error) {
+      throw error;
+    }
+  }
+
+  async revokeStudentSessionsByStudent(studentId: string, reason: string): Promise<void> {
+    const { error } = await this.client
+      .from('student_sessions')
+      .update({
+        revoked_at: new Date().toISOString(),
+        revoke_reason: reason,
+      })
+      .eq('student_id', studentId)
+      .is('revoked_at', null);
+
+    if (error) {
+      throw error;
+    }
+  }
+
+  // ============================================================
+  // SECURITY_AUDIT_LOGS - Auditoria de seguranca
+  // ============================================================
+
+  async logSecurityAuditEvent(input: {
+    actorType: 'anonymous' | 'student' | 'organizer' | 'system';
+    actorId?: string | null;
+    eventType: string;
+    path?: string | null;
+    method?: string | null;
+    statusCode?: number | null;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+    metadata?: Record<string, unknown> | null;
+  }): Promise<void> {
+    const { error } = await this.client
+      .from('security_audit_logs')
+      .insert({
+        actor_type: input.actorType,
+        actor_id: input.actorId || null,
+        event_type: input.eventType,
+        path: input.path || null,
+        method: input.method || null,
+        status_code: input.statusCode || null,
+        ip_address: input.ipAddress || null,
+        user_agent: input.userAgent || null,
+        metadata: input.metadata || {},
+      });
+
+    if (error) {
+      throw error;
+    }
   }
 
   // ============================================================

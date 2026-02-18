@@ -1,201 +1,218 @@
-import express, { Application } from 'express';
+import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import express, { Application, Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
 
-import { DatabaseService } from './services/database/DatabaseService';
-import { AuthService } from './services/auth/AuthService';
 import { createAuthRoutes } from './routes/auth.routes';
-import { createStudentRoutes } from './routes/student.routes';
 import { createOrganizerRoutes } from './routes/organizer.routes';
 import { createPublicRoutes } from './routes/public.routes';
+import { createStudentRoutes } from './routes/student.routes';
 import { createThemeRoutes } from './routes/theme.routes';
-import { notFoundHandler, errorHandler } from './middleware/error.middleware';
+import { errorHandler, notFoundHandler } from './middleware/error.middleware';
+import { createSecurityAuditMiddleware, requestIdMiddleware, structuredLoggingMiddleware } from './middleware/security.middleware';
+import { AuthService } from './services/auth/AuthService';
+import { StudentSessionService } from './services/auth/StudentSessionService';
+import { DatabaseService } from './services/database/DatabaseService';
 
-// Carregar variáveis de ambiente
 dotenv.config();
 
-/**
- * Inicializa e configura a aplicação Express
- */
+function parseAllowedOrigins(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function assertStrongJwtSecret(secret: string): void {
+  const isPlaceholder =
+    !secret ||
+    secret.length < 32 ||
+    /^change_me/i.test(secret) ||
+    /^seu-secret-aqui/i.test(secret);
+
+  if (isPlaceholder) {
+    throw new Error('JWT_SECRET ausente ou fraco. Defina um segredo forte com pelo menos 32 caracteres.');
+  }
+}
+
+function assertServiceKey(serviceKey: string): void {
+  const placeholderValues = new Set([
+    '',
+    'your_service_role_key',
+    'your_service_role_key_here',
+    'your_service_key',
+  ]);
+
+  if (placeholderValues.has(serviceKey.trim())) {
+    throw new Error('SUPABASE_SERVICE_KEY obrigatoria. O backend nao aceita fallback para anon key.');
+  }
+}
+
 async function initializeApp(): Promise<Application> {
   const app = express();
+  app.disable('x-powered-by');
+  app.set('trust proxy', 1);
 
-  // ============================================================
-  // VARIÁVEIS DE AMBIENTE
-  // ============================================================
   const supabaseUrl = (process.env.SUPABASE_URL || '').trim();
-  // Use Service Key to bypass RLS on backend if provided and not a placeholder
   const serviceKey = (process.env.SUPABASE_SERVICE_KEY || '').trim();
-  const anonKey = (process.env.SUPABASE_ANON_KEY || '').trim();
+  const jwtSecret = (process.env.JWT_SECRET || '').trim();
+  const port = Number(process.env.PORT || 4300);
+  const nodeEnv = (process.env.NODE_ENV || 'development').trim();
+  const rawAllowedOrigins = process.env.CORS_ORIGIN || 'http://localhost:5174';
+  const allowedOrigins = parseAllowedOrigins(rawAllowedOrigins);
 
-  const supabaseKey = (serviceKey && serviceKey !== 'your_service_role_key_here')
-    ? serviceKey
-    : anonKey;
-  const jwtSecret = process.env.JWT_SECRET || 'seu-secret-aqui';
-  const port = process.env.PORT || 4300;
-
-  if (!supabaseUrl || !supabaseKey) {
-    throw new Error('SUPABASE_URL e SUPABASE_KEY são obrigatórios');
+  if (!supabaseUrl) {
+    throw new Error('SUPABASE_URL obrigatoria');
   }
 
-  // ============================================================
-  // MIDDLEWARES GLOBAIS
-  // ============================================================
+  assertServiceKey(serviceKey);
+  assertStrongJwtSecret(jwtSecret);
 
-  // CORS
-  const allowedOrigins = [
-    process.env.CORS_ORIGIN || 'http://localhost:5174',
-    'http://localhost:5174',
-    'http://localhost:5173',
-    'http://localhost:3000'
-  ];
+  if (nodeEnv === 'production' && allowedOrigins.length === 0) {
+    throw new Error('CORS_ORIGIN deve ser configurado em producao');
+  }
+
+  app.use(requestIdMiddleware);
+  app.use(structuredLoggingMiddleware);
 
   app.use(
-    cors({
-      origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true);
-
-        if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
-          callback(null, true);
-        } else {
-          // Temporarily allow all for debugging if needed, but for now stick to list
-          // console.warn('Blocked by CORS:', origin);
-          // return callback(new Error('Not allowed by CORS'));
-          // For development ease, let's essentially allow all localhost
-          if (origin.startsWith('http://localhost')) {
-            return callback(null, true);
-          }
-          callback(new Error('Not allowed by CORS'));
-        }
-      },
-      credentials: true,
+    helmet({
+      hsts: nodeEnv === 'production',
+      referrerPolicy: { policy: 'no-referrer' },
+      contentSecurityPolicy: false,
     })
   );
 
-  // Body parser
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ limit: '10mb', extended: true }));
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        // Permite clients sem origem (CLI/health probes).
+        if (!origin) {
+          return callback(null, true);
+        }
 
-  // ============================================================
-  // SERVIÇOS
-  // ============================================================
+        if (allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
 
-  const database = new DatabaseService(supabaseUrl, supabaseKey);
-  const authService = new AuthService(database, supabaseUrl, supabaseKey);
+        return callback(new Error('Not allowed by CORS'));
+      },
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'X-Request-Id'],
+    })
+  );
 
-  // Verificar conexão com banco de dados
-  console.log('Verificando conexão com Supabase...');
-  const isHealthy = await database.healthCheck();
-  if (!isHealthy) {
-    console.warn('⚠️  Aviso: Não foi possível conectar ao Supabase');
-  } else {
-    console.log('✅ Conexão com Supabase estabelecida');
+  if (nodeEnv === 'production') {
+    app.use((req: Request, res: Response, next) => {
+      const forwardedProto = String(req.headers['x-forwarded-proto'] || '').toLowerCase();
+      if (forwardedProto && forwardedProto !== 'https') {
+        return res.status(400).json({
+          error: 'HTTPS obrigatorio',
+        });
+      }
+
+      return next();
+    });
   }
 
-  // ============================================================
-  // ROTAS
-  // ============================================================
+  app.use(express.json({ limit: '2mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+  app.use(cookieParser());
 
-  // Health check
-  app.get('/health', (req, res) => {
+  const globalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 1200,
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+  const authLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 80,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Muitas tentativas de autenticacao. Tente novamente em alguns minutos.' },
+  });
+  const studentWriteLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 240,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Limite de operacoes de aluno excedido. Aguarde para tentar novamente.' },
+  });
+  const searchLimiter = rateLimit({
+    windowMs: 5 * 60 * 1000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Limite de consultas excedido. Aguarde para tentar novamente.' },
+  });
+
+  app.use(globalLimiter);
+
+  const database = new DatabaseService(supabaseUrl, serviceKey);
+  const authService = new AuthService(database, supabaseUrl, serviceKey);
+  const studentSessionService = new StudentSessionService(database, jwtSecret, {
+    jwtIssuer: process.env.JWT_ISSUER || 'curricularizacao-api',
+    jwtAudience: process.env.JWT_AUDIENCE || 'student-api',
+  });
+
+  app.use(createSecurityAuditMiddleware(database));
+
+  const isHealthy = await database.healthCheck();
+  if (!isHealthy) {
+    console.warn('Supabase health check falhou na inicializacao. O servidor subiu em modo degradado.');
+  }
+
+  app.get('/health', (_req, res) => {
     res.status(200).json({
       status: 'ok',
       timestamp: new Date().toISOString(),
-      version: '1.0.0',
+      version: '2.0.0',
+      security: {
+        rlsRequired: true,
+        backendOnly: true,
+      },
     });
   });
 
-  // Themes route FIRST (to see if it hits)
+  app.use('/api/auth', authLimiter, createAuthRoutes(authService, studentSessionService));
   app.use('/api/themes', createThemeRoutes(database));
-
-  // Auth routes (sem autenticação)
-  app.use('/api/auth', createAuthRoutes(authService));
-
-  // Student routes (sem autenticação, apenas para registro)
-  app.use('/api/students', createStudentRoutes(database));
-
-  // Public/Search routes (sem autenticação)
-  app.use('/api/search', createPublicRoutes(database));
-
-  // Organizer routes (requer autenticação)
+  app.use('/api/search', searchLimiter, createPublicRoutes(database));
+  app.use('/api/students', studentWriteLimiter, createStudentRoutes(database, studentSessionService));
   app.use('/api/organizer', createOrganizerRoutes(database, authService));
 
-  // ============================================================
-  // ERROR HANDLING
-  // ============================================================
-
-  // 404 handler (deve estar após todas as rotas)
   app.use(notFoundHandler);
-
-  // Global error handler (deve estar por último)
   app.use(errorHandler);
 
-  // ============================================================
-  // INICIAR SERVIDOR
-  // ============================================================
-
-  return new Promise((resolve) => {
-    const server = app.listen(port, () => {
-      console.log(`
-╔════════════════════════════════════════════════════════════════════════════╗
-║                    🚀 SERVIDOR BACKEND INICIADO 🚀                         ║
-╚════════════════════════════════════════════════════════════════════════════╝
-
-📊 INFORMAÇÕES DO SERVIDOR:
-───────────────────────────────────────────────────────────────────────────
-  URL:     http://localhost:${port}
-  Ambiente: ${process.env.NODE_ENV || 'development'}
-  CORS:    ${process.env.CORS_ORIGIN || 'http://localhost:5174'}
-
-📚 ROTAS DISPONÍVEIS:
-───────────────────────────────────────────────────────────────────────────
-  GET  /health                                    → Health check
-
-  POST /api/auth/login                           → Login organizador
-  GET  /api/auth/verify                          → Verificar token
-
-  POST /api/students/:distributionId             → Registrar aluno
-  PUT  /api/students/:studentId/preferences      → Adicionar preferências
-  GET  /api/students/:studentId                  → Buscar dados do aluno
-
-  GET  /api/search?name=...&distributionId=...  → Buscar resultado (público)
-  GET  /api/themes/:distributionId               → Listar temas (público)
-
-  POST /api/organizer/distributions              → Criar distribuição
-  POST /api/organizer/distributions/:id/themes   → Upload de temas
-  POST /api/organizer/distributions/:id/execute  → Executar distribuição
-  GET  /api/organizer/distributions/:id/results  → Resultados
-
-🔐 AUTENTICAÇÃO:
-───────────────────────────────────────────────────────────────────────────
-  JWT Secret: Configurado (${jwtSecret.length} caracteres)
-  Expiração: 24h
-
-🗄️  BANCO DE DADOS:
-───────────────────────────────────────────────────────────────────────────
-  Supabase URL: ${supabaseUrl}
-  Conexão: ${isHealthy ? '✅ OK' : '⚠️  Erro'}
-
-═══════════════════════════════════════════════════════════════════════════
-      Pressione Ctrl+C para parar o servidor
-═══════════════════════════════════════════════════════════════════════════
-      `);
-      resolve(app);
+  await new Promise<void>((resolve) => {
+    app.listen(port, () => {
+      console.log(
+        JSON.stringify({
+          level: 'info',
+          event: 'server_started',
+          port,
+          nodeEnv,
+          allowedOrigins,
+          supabaseUrl,
+          timestamp: new Date().toISOString(),
+        })
+      );
+      resolve();
     });
   });
+
+  return app;
 }
 
-// ============================================================
-// INICIAR APLICAÇÃO
-// ============================================================
-
 if (require.main === module) {
-  initializeApp()
-    .catch((error) => {
-      console.error('❌ Erro ao inicializar servidor:', error);
-      process.exit(1);
-    });
+  initializeApp().catch((error) => {
+    console.error('Falha ao inicializar servidor', error);
+    process.exit(1);
+  });
 }
 
 export default initializeApp;
+

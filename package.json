@@ -14,7 +14,8 @@
     "dev:shadow": "concurrently -n v1,v2 -c cyan,white \"npm run dev:v1\" \"npm run dev:v2\"",
     "build:v2": "npm --prefix v2/backend run build && npm --prefix v2/frontend run build",
     "test:v2": "npm --prefix v2/backend run test",
-    "check:v2": "npm run build:v2 && npm run test:v2"
+    "security:v2": "npm --prefix v2/backend run security:check",
+    "check:v2": "npm run build:v2 && npm run test:v2 && npm run security:v2"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

@@ -49,7 +49,7 @@ export function StudentFormPage() {
     try {
       setLoading(true);
       const response = await api.registerStudent(distributionId, name, course, phase);
-      navigate(`/student/${response.data.studentId}/preferences/${distributionId}`);
+      navigate(`/student/preferences/${distributionId}`);
     } catch (err: any) {
       setError(err.response?.data?.error || err.response?.data?.message || 'Erro ao registrar');
     } finally {

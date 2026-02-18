@@ -18,6 +18,7 @@ export function StudentResultPage() {
   const [result, setResult] = useState<any>(null);
   const [searched, setSearched] = useState(false);
   const [access, setAccess] = useState<StudentDistributionAccess | null>(null);
+  const [startingAffinitySession, setStartingAffinitySession] = useState(false);
 
   useEffect(() => {
     const loadAccess = async () => {
@@ -66,6 +67,27 @@ export function StudentResultPage() {
       setError(err.response?.data?.error || 'Erro ao buscar resultado');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOpenAffinities = async () => {
+    if (!distributionId || !result?.studentId) {
+      return;
+    }
+
+    try {
+      setStartingAffinitySession(true);
+      await api.createStudentSession(distributionId, {
+        studentId: result.studentId,
+        name: result.studentName,
+        course: result.course,
+        phase: result.phase,
+      });
+      navigate(`/student/affinities/${distributionId}`);
+    } catch (err: any) {
+      setError(err?.message || 'Nao foi possivel iniciar sessao para afinidades');
+    } finally {
+      setStartingAffinitySession(false);
     }
   };
 
@@ -207,11 +229,12 @@ export function StudentResultPage() {
                   <p className="text-sm text-rose-900">A coleta de afinidades esta aberta para esta distribuicao.</p>
                   <button
                     type="button"
-                    onClick={() => navigate(`/student/${result.studentId}/affinities/${distributionId}`)}
-                    className="mt-3 inline-flex items-center rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
+                    onClick={handleOpenAffinities}
+                    disabled={startingAffinitySession}
+                    className="mt-3 inline-flex items-center rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-60"
                   >
                     <Heart className="mr-2 h-4 w-4" />
-                    Declarar/atualizar afinidades
+                    {startingAffinitySession ? 'Preparando sessao...' : 'Declarar/atualizar afinidades'}
                   </button>
                 </div>
               )}

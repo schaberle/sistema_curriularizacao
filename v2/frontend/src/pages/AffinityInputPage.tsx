@@ -15,7 +15,7 @@ interface CandidateStudent {
  * AffinityInputPage - Pagina para aluno declarar afinidades sociais (Fase 2)
  */
 export function AffinityInputPage() {
-  const { distributionId, studentId } = useParams<{ distributionId: string; studentId: string }>();
+  const { distributionId } = useParams<{ distributionId: string }>();
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
@@ -23,6 +23,7 @@ export function AffinityInputPage() {
   const [error, setError] = useState('');
 
   const [access, setAccess] = useState<StudentDistributionAccess | null>(null);
+  const [activeStudentId, setActiveStudentId] = useState('');
   const [studentName, setStudentName] = useState('');
   const [currentGroup, setCurrentGroup] = useState<any>(null);
 
@@ -36,19 +37,25 @@ export function AffinityInputPage() {
 
   useEffect(() => {
     const loadData = async () => {
-      if (!studentId || !distributionId) return;
+      if (!distributionId) return;
 
       try {
         setLoading(true);
         setError('');
+        const activeSession = await api.getCurrentStudentSession();
+        if (!activeSession || activeSession.distributionId !== distributionId) {
+          setError('Sessao de aluno ausente ou invalida. Reentre pelo resultado ou formulario.');
+          return;
+        }
 
         const [accessResponse, studentResponse] = await Promise.all([
           api.getStudentDistributionAccess(distributionId),
-          api.getStudent(studentId),
+          api.getStudentMe(),
         ]);
 
         const accessData = accessResponse.data as StudentDistributionAccess;
         setAccess(accessData);
+        setActiveStudentId(studentResponse.data?.id || activeSession.studentId);
         setStudentName(studentResponse.data?.name || '');
 
         if (!accessData.affinitiesOpen) {
@@ -57,8 +64,8 @@ export function AffinityInputPage() {
         }
 
         const [groupResponse, affinitiesResponse] = await Promise.all([
-          api.getStudentCurrentGroup(studentId),
-          api.getStudentAffinities(studentId),
+          api.getStudentCurrentGroup(),
+          api.getStudentAffinities(),
         ]);
 
         const groupData = groupResponse.data || null;
@@ -74,7 +81,7 @@ export function AffinityInputPage() {
         setExistingAffinities(loadedAffinities);
 
         for (const member of groupData?.members || []) {
-          if (member.id !== studentId) {
+          if (member.id !== studentResponse.data?.id) {
             initialAffinities[member.id] = loadedAffinities[member.id] ?? 0;
           }
         }
@@ -88,7 +95,7 @@ export function AffinityInputPage() {
     };
 
     loadData();
-  }, [studentId, distributionId]);
+  }, [distributionId]);
 
   const hasAnyAffinity = useMemo(() => Object.values(affinities).some((value) => value !== 0), [affinities]);
 
@@ -97,7 +104,6 @@ export function AffinityInputPage() {
   };
 
   const executeCandidateSearch = async (query: string) => {
-    if (!studentId) return;
     if (query.length < 2) {
       setSearchResults([]);
       return;
@@ -105,7 +111,7 @@ export function AffinityInputPage() {
 
     try {
       setSearchLoading(true);
-      const response = await api.searchAffinityCandidates(studentId, query);
+      const response = await api.searchAffinityCandidates(query);
       const results = (response.data?.candidates || []) as CandidateStudent[];
       setSearchResults(results);
     } catch (err: any) {
@@ -133,7 +139,7 @@ export function AffinityInputPage() {
     }, 250);
 
     return () => window.clearTimeout(timeoutId);
-  }, [searchQuery, studentId]);
+  }, [searchQuery]);
 
   const handleAddStudent = (student: CandidateStudent) => {
     if (addedStudents.some((item) => item.id === student.id)) {
@@ -157,8 +163,6 @@ export function AffinityInputPage() {
   };
 
   const handleSaveAffinities = async () => {
-    if (!studentId) return;
-
     try {
       setSubmitting(true);
       setError('');
@@ -167,7 +171,7 @@ export function AffinityInputPage() {
         .filter(([_, value]) => value !== 0)
         .map(([targetStudentId, value]) => ({ targetStudentId, value }));
 
-      await api.submitStudentAffinities(studentId, payload);
+      await api.submitStudentAffinities(payload);
       navigate(`/student/result/${distributionId}`);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Erro ao salvar afinidades');
@@ -264,7 +268,7 @@ export function AffinityInputPage() {
 
             <div className="space-y-5">
               {(currentGroup.members || [])
-                .filter((member: any) => member.id !== studentId)
+                .filter((member: any) => member.id !== activeStudentId)
                 .map((member: any) => {
                   const affinityValue = affinities[member.id] || 0;
                   return (

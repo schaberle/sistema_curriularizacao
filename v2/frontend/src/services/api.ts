@@ -1,4 +1,4 @@
-import axios, { AxiosError, AxiosInstance } from 'axios';
+﻿import axios, { AxiosError, AxiosInstance } from 'axios';
 import { supabase } from './supabase';
 import type {
   Distribution,
@@ -25,15 +25,76 @@ import type {
 } from '../types/distribution.types';
 
 /**
- * API Client - Cliente HTTP para comunicação com backend
+ * API Client - Cliente HTTP para comunicaÃ§Ã£o com backend
  *
  * Responsabilidades:
  * 1. Configurar cliente Axios
  * 2. Adicionar interceptadores (auth, erro)
- * 3. Fornecer métodos tipados para cada rota
+ * 3. Fornecer mÃ©todos tipados para cada rota
  */
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4300';
+const STUDENT_SESSION_STORAGE_KEY = 'v2_student_session';
+
+type StudentSessionState = {
+  accessToken: string;
+  studentId: string;
+  distributionId: string;
+  expiresAtMs: number;
+};
+
+let studentSessionState: StudentSessionState | null = null;
+
+function readCookie(name: string): string {
+  const encodedName = `${encodeURIComponent(name)}=`;
+  const parts = document.cookie.split(';');
+  for (const part of parts) {
+    const normalized = part.trim();
+    if (normalized.startsWith(encodedName)) {
+      return decodeURIComponent(normalized.slice(encodedName.length));
+    }
+  }
+  return '';
+}
+
+function setStudentSessionState(next: StudentSessionState | null): void {
+  studentSessionState = next;
+  if (next) {
+    sessionStorage.setItem(STUDENT_SESSION_STORAGE_KEY, JSON.stringify(next));
+  } else {
+    sessionStorage.removeItem(STUDENT_SESSION_STORAGE_KEY);
+  }
+}
+
+function loadStudentSessionState(): StudentSessionState | null {
+  if (studentSessionState) {
+    return studentSessionState;
+  }
+
+  const raw = sessionStorage.getItem(STUDENT_SESSION_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as StudentSessionState;
+    if (!parsed?.accessToken || !parsed?.studentId || !parsed?.distributionId || !parsed?.expiresAtMs) {
+      setStudentSessionState(null);
+      return null;
+    }
+
+    if (Date.now() >= Number(parsed.expiresAtMs)) {
+      setStudentSessionState(null);
+      return null;
+    }
+
+    studentSessionState = parsed;
+    return parsed;
+  } catch {
+    setStudentSessionState(null);
+    return null;
+  }
+}
 
 type LegacyResponse<T = any> = {
   success?: boolean;
@@ -441,38 +502,62 @@ function normalizeSimulationRunCompleted(raw: any): SimulationRunCompleted {
 
 class APIClient {
   private client: AxiosInstance;
-
   constructor() {
     this.client = axios.create({
       baseURL: API_URL,
+      withCredentials: true,
       headers: {
         'Content-Type': 'application/json',
       },
     });
 
-    // Interceptador: adicionar token JWT às requisições
+    // Interceptador: token de organizador (Supabase) ou token de aluno (sessao local).
     this.client.interceptors.request.use(async (config) => {
+      const isStudentRequest = Boolean((config as any)?.meta?.studentAuth);
+
+      if (isStudentRequest) {
+        const studentSession = loadStudentSessionState();
+        if (studentSession?.accessToken) {
+          config.headers = config.headers || {};
+          config.headers.Authorization = `Bearer ${studentSession.accessToken}`;
+        }
+        return config;
+      }
+
       const { data } = await supabase.auth.getSession();
       if (data.session?.access_token) {
+        config.headers = config.headers || {};
         config.headers.Authorization = `Bearer ${data.session.access_token}`;
       }
       return config;
     });
 
-    // Interceptador: tratar erros
+    // Interceptador: refresh e tratamento de erros.
     this.client.interceptors.response.use(
       (response) => response,
       async (error: AxiosError) => {
         const status = error.response?.status;
         const originalRequest = error.config as any;
+        const isStudentRequest = Boolean(originalRequest?.meta?.studentAuth);
 
-        if (status === 401 && originalRequest && !originalRequest._retry) {
+        if (status === 401 && isStudentRequest && originalRequest && !originalRequest._studentRetry) {
+          originalRequest._studentRetry = true;
+          const refreshed = await this.refreshStudentSession();
+          if (refreshed) {
+            const studentSession = loadStudentSessionState();
+            if (studentSession?.accessToken) {
+              originalRequest.headers = originalRequest.headers || {};
+              originalRequest.headers.Authorization = `Bearer ${studentSession.accessToken}`;
+              return this.client.request(originalRequest);
+            }
+          }
+        }
+
+        if (status === 401 && !isStudentRequest && originalRequest && !originalRequest._retry) {
           originalRequest._retry = true;
-
           try {
             const { data, error: refreshError } = await supabase.auth.refreshSession();
             const refreshedToken = data.session?.access_token;
-
             if (!refreshError && refreshedToken) {
               originalRequest.headers = originalRequest.headers || {};
               originalRequest.headers.Authorization = `Bearer ${refreshedToken}`;
@@ -484,10 +569,14 @@ class APIClient {
         }
 
         if (status === 401) {
-          const { data } = await supabase.auth.getSession();
-          if (!data.session) {
-            const nextPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-            window.location.assign(`/login?next=${encodeURIComponent(nextPath)}`);
+          if (isStudentRequest) {
+            await this.logoutStudent();
+          } else {
+            const { data } = await supabase.auth.getSession();
+            if (!data.session) {
+              const nextPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+              window.location.assign(`/login?next=${encodeURIComponent(nextPath)}`);
+            }
           }
         }
 
@@ -502,7 +591,59 @@ class APIClient {
       }
     );
   }
-
+  private studentRequestConfig() {
+    return {
+      withCredentials: true,
+      headers: {
+        'X-CSRF-Token': readCookie('student_csrf_token') || '',
+      },
+      meta: {
+        studentAuth: true,
+      },
+    } as any;
+  }
+  private storeStudentSession(data: {
+    accessToken: string;
+    accessTokenExpiresInSec: number;
+    studentId: string;
+    distributionId: string;
+  }): void {
+    setStudentSessionState({
+      accessToken: data.accessToken,
+      studentId: data.studentId,
+      distributionId: data.distributionId,
+      expiresAtMs: Date.now() + Number(data.accessTokenExpiresInSec || 0) * 1000,
+    });
+  }
+  private async refreshStudentSession(): Promise<boolean> {
+    try {
+      const response = await axios.post(
+        `${API_URL}/api/auth/refresh`,
+        {},
+        {
+          withCredentials: true,
+          headers: {
+            'X-CSRF-Token': readCookie('student_csrf_token') || '',
+          },
+        }
+      );
+      const payload = response.data?.data;
+      const currentStudentSession = loadStudentSessionState();
+      if (!payload?.accessToken || !currentStudentSession) {
+        return false;
+      }
+      this.storeStudentSession({
+        accessToken: payload.accessToken,
+        accessTokenExpiresInSec: payload.accessTokenExpiresInSec,
+        studentId: currentStudentSession.studentId,
+        distributionId: currentStudentSession.distributionId,
+      });
+      return true;
+    } catch {
+      setStudentSessionState(null);
+      return false;
+    }
+  }
   // ============================================================
   // AUTH
   // ============================================================
@@ -525,21 +666,77 @@ class APIClient {
   // ============================================================
 
   async registerStudent(distributionId: string, name: string, course: string, phase: number) {
-    const response = await this.client.post(
-      `/api/students/${distributionId}`,
-      {
-        name,
-        course,
-        phase,
-      }
-    );
+    const response = await this.client.post(`/api/students/${distributionId}`, {
+      name,
+      course,
+      phase,
+    });
+
+    const payload = response.data?.data;
+    if (payload?.accessToken && payload?.studentId && payload?.distributionId) {
+      this.storeStudentSession({
+        accessToken: payload.accessToken,
+        accessTokenExpiresInSec: payload.accessTokenExpiresInSec,
+        studentId: payload.studentId,
+        distributionId: payload.distributionId,
+      });
+    }
+
     return response.data;
   }
 
-  async updateStudentPreferences(studentId: string, preferences: Array<{ themeId: string; rank: number }>) {
+  async createStudentSession(
+    distributionId: string,
+    data: { studentId?: string; name: string; course: string; phase: number }
+  ) {
+    const response = await this.client.post(`/api/students/${distributionId}/session`, data);
+    const payload = response.data?.data;
+
+    if (payload?.accessToken && payload?.studentId && payload?.distributionId) {
+      this.storeStudentSession({
+        accessToken: payload.accessToken,
+        accessTokenExpiresInSec: payload.accessTokenExpiresInSec,
+        studentId: payload.studentId,
+        distributionId: payload.distributionId,
+      });
+    }
+
+    return response.data;
+  }
+
+  async getCurrentStudentSession() {
+    return loadStudentSessionState();
+  }
+
+  async logoutStudent() {
+    try {
+      await axios.post(
+        `${API_URL}/api/auth/logout`,
+        {},
+        {
+          withCredentials: true,
+          headers: {
+            'X-CSRF-Token': readCookie('student_csrf_token') || '',
+          },
+        }
+      );
+    } catch {
+      // Mesmo com erro no backend, limpamos sessao local para nao manter token stale.
+    } finally {
+      setStudentSessionState(null);
+    }
+  }
+
+  async getStudentMe() {
+    const response = await this.client.get('/api/students/me', this.studentRequestConfig());
+    return response.data;
+  }
+
+  async updateStudentPreferences(preferences: Array<{ themeId: string; rank: number }>) {
     const response = await this.client.put(
-      `/api/students/${studentId}/preferences`,
-      { preferences }
+      '/api/students/me/preferences',
+      { preferences },
+      this.studentRequestConfig()
     );
     return response.data;
   }
@@ -558,7 +755,7 @@ class APIClient {
       const message = String(error?.response?.data?.error || '').toLowerCase();
       const routeMissing =
         status === 404 &&
-        (message.includes('rota não encontrada') ||
+        (message.includes('rota nÃ£o encontrada') ||
           message.includes('rota nao encontrada') ||
           message.includes('route not found'));
 
@@ -611,9 +808,10 @@ class APIClient {
     }
   }
 
-  async searchAffinityCandidates(studentId: string, query: string) {
-    const response = await this.client.get(`/api/students/${studentId}/affinity-candidates`, {
+  async searchAffinityCandidates(query: string) {
+    const response = await this.client.get('/api/students/me/affinity-candidates', {
       params: { q: query },
+      ...this.studentRequestConfig(),
     });
     return response.data;
   }
@@ -841,27 +1039,23 @@ class APIClient {
   // STUDENTS - AFFINITY (PHASE 2)
   // ============================================================
 
-  async getStudentCurrentGroup(studentId: string) {
-    const response = await this.client.get(
-      `/api/students/${studentId}/current-group`
-    );
+  async getStudentCurrentGroup() {
+    const response = await this.client.get('/api/students/me/current-group', this.studentRequestConfig());
     return response.data;
   }
 
-  async getStudentAffinities(studentId: string) {
-    const response = await this.client.get(
-      `/api/students/${studentId}/affinities`
-    );
+  async getStudentAffinities() {
+    const response = await this.client.get('/api/students/me/affinities', this.studentRequestConfig());
     return response.data;
   }
 
   async submitStudentAffinities(
-    studentId: string,
     affinities: Array<{ targetStudentId: string; value: number }>
   ) {
     const response = await this.client.put(
-      `/api/students/${studentId}/affinities`,
-      { affinities }
+      '/api/students/me/affinities',
+      { affinities },
+      this.studentRequestConfig()
     );
     return response.data;
   }
@@ -888,13 +1082,13 @@ const api = new APIClient();
 
 export async function listDistributions(): Promise<Distribution[]> {
   const response = (await api.listDistributions()) as LegacyResponse<{ distributions: any[] }>;
-  const data = ensureSuccess(response, 'Falha ao listar distribuições');
+  const data = ensureSuccess(response, 'Falha ao listar distribuiÃ§Ãµes');
   return (data.distributions ?? []).map(normalizeDistribution);
 }
 
 export async function createDistribution(): Promise<string> {
   const response = (await api.createDistribution()) as LegacyResponse<{ distributionId: string }>;
-  const data = ensureSuccess(response, 'Falha ao criar distribuição');
+  const data = ensureSuccess(response, 'Falha ao criar distribuiÃ§Ã£o');
   return data.distributionId;
 }
 
@@ -928,7 +1122,7 @@ export async function getDistribution(distributionId: string): Promise<{
       ? normalizeStatistics(
           ensureSuccess(
             statisticsResult.value as LegacyResponse<any>,
-            'Falha ao carregar estatísticas'
+            'Falha ao carregar estatÃ­sticas'
           ),
           distributionId
         )
@@ -963,7 +1157,7 @@ export async function uploadThemes(distributionId: string, themes: Theme[]): Pro
 
 export async function getDistributionStatistics(distributionId: string): Promise<Statistics> {
   const response = (await api.getDistributionStatistics(distributionId)) as LegacyResponse<any>;
-  const data = ensureSuccess(response, 'Falha ao carregar estatísticas');
+  const data = ensureSuccess(response, 'Falha ao carregar estatÃ­sticas');
   return normalizeStatistics(data, distributionId);
 }
 
@@ -1098,7 +1292,7 @@ export async function openSimulationRunStream(
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) {
-    throw new Error('Sessao expirada. Faça login novamente.');
+    throw new Error('Sessao expirada. FaÃ§a login novamente.');
   }
 
   const streamUrl = `${API_URL}/api/organizer/simulation/runs/${runId}/stream?access_token=${encodeURIComponent(token)}`;
