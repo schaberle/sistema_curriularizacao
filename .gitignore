@@ -1,126 +1,66 @@
-# Environment variables
-.env
-.env.local
-.env.*.local
-.env.production
+# =========================
+# Strict whitelist strategy
+# =========================
+# Ignore everything by default, then re-allow only what is essential
+# for runtime/maintenance of v2 + migrations + README.
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
+*
 
-# Node
-node_modules/
-npm-debug.log
-yarn-error.log
-package-lock.json
-yarn.lock
+# Always keep gitignore and root docs/config needed to run workspace scripts
+!.gitignore
+!README.md
+!package.json
 
-# Build output
-dist/
-build/
-*.js.map
-*.css.map
+# Keep setup scripts
+!scripts/
+!scripts/**
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-ENV/
-pip-log.txt
-pip-delete-this-directory.txt
+# Keep active app (v2)
+!v2/
+!v2/backend/
+!v2/backend/**
+!v2/frontend/
+!v2/frontend/**
 
-# Supabase
-.supabase/
-.env.supabase
+# Keep database migrations
+!supabase/
+!supabase/migrations/
+!supabase/migrations/**
 
-# OS
-.DS_Store
-Thumbs.db
+# -------------------------
+# Re-ignore generated files
+# -------------------------
+**/node_modules/
+**/dist/
+**/build/
+**/coverage/
+**/.nyc_output/
+**/.cache/
+**/tmp/
+**/temp/
+**/*.log
+**/*.tmp
+**/*.tsbuildinfo
+**/package-lock.json
+**/yarn.lock
 
-# Logs
-logs/
-*.log
-
-# Temporary files
-*.tmp
-temp/
-tmp/
-
-# Build artifacts
-dist/
-build/
-out/
-
-# Test coverage
-coverage/
-.nyc_output/
-
-# Misc
-.cache/
-.parcel-cache/
-.next/
-.nuxt/
-.cache
-.vuepress/dist
-.serverless/
-.fusebox/
-.dynamodb/
-.tern-port
-
-# IDE specific
-*.sublime-workspace
-*.sublime-project
-.vscode-test
-.vscode/launch.json
-.vscode/settings.json
-.vscode/extensions.json
-.history
-
-# Passwords and secrets (NUNCA fazer commit!)
+# Environment and secrets
+**/.env
+**/.env.*
+!**/.env.example
 *.pem
 *.key
+*.crt
+*.p12
 secrets.json
 credentials.json
 auth.json
-.ssh/
 
-# Database backups
-*.sql
-!supabase/migrations/*.sql
-
-# npm/yarn
-.npm
-.yarn/cache
-.yarn/unplugged
-.yarn/build-state.yml
-.yarn/install-state.gz
-.pnp.*
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+# OS / IDE noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
