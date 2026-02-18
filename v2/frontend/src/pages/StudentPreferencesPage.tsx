@@ -1,6 +1,6 @@
-﻿import { useEffect, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertCircle, ArrowDown, ArrowUp, CheckCircle2, CheckSquare, GripVertical, List, Save, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronUp, ListChecks, RotateCcw, Save } from 'lucide-react';
 import api from '../services/api';
 import { StudentDistributionAccess } from '../types/student.types';
 
@@ -10,20 +10,48 @@ interface Theme {
   description: string;
 }
 
+const RATING_MIN = -5;
+const RATING_MAX = 5;
+const RATING_STEP = 0.05;
+
+function normalizeRating(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  const clamped = Math.min(RATING_MAX, Math.max(RATING_MIN, value));
+  const rounded = Math.round(clamped / RATING_STEP) * RATING_STEP;
+  return Number(rounded.toFixed(2));
+}
+
+function formatRating(value: number): string {
+  return value > 0 ? `+${value.toFixed(2)}` : value.toFixed(2);
+}
+
+function compareThemesByRating(a: Theme, b: Theme, ratings: Record<string, number>): number {
+  const diff = (ratings[b.id] ?? 0) - (ratings[a.id] ?? 0);
+  if (Math.abs(diff) > 1e-9) {
+    return diff;
+  }
+
+  return a.name.localeCompare(b.name, 'pt-BR');
+}
+
 /**
- * StudentPreferencesPage - Pagina para aluno rankear temas
+ * StudentPreferencesPage - Pagina para aluno avaliar temas
  */
 export function StudentPreferencesPage() {
   const { studentId, distributionId } = useParams<{ studentId: string; distributionId: string }>();
   const navigate = useNavigate();
 
   const [themes, setThemes] = useState<Theme[]>([]);
-  const [preferences, setPreferences] = useState<string[]>([]);
+  const [ratings, setRatings] = useState<Record<string, number>>({});
   const [access, setAccess] = useState<StudentDistributionAccess | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [error, setError] = useState('');
+  const [expandedThemeId, setExpandedThemeId] = useState<string | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -43,8 +71,16 @@ export function StudentPreferencesPage() {
         }
 
         const themesResponse = await api.getThemes(distributionId);
-        setThemes(themesResponse.data.themes || []);
-        setPreferences([]);
+        const loadedThemes = (themesResponse.data.themes || []) as Theme[];
+
+        setThemes(loadedThemes);
+        setRatings(
+          loadedThemes.reduce<Record<string, number>>((acc, theme) => {
+            acc[theme.id] = 0;
+            return acc;
+          }, {})
+        );
+        setExpandedThemeId(null);
       } catch (err: any) {
         setError(err.response?.data?.error || 'Erro ao carregar dados da distribuicao');
       } finally {
@@ -55,43 +91,39 @@ export function StudentPreferencesPage() {
     loadData();
   }, [distributionId]);
 
-  const handleDragStart = (e: React.DragEvent, themeId: string) => {
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', themeId);
-  };
+  const rankedThemes = useMemo(
+    () => [...themes].sort((a, b) => compareThemesByRating(a, b, ratings)),
+    [themes, ratings]
+  );
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    const themeId = e.dataTransfer.getData('text/plain');
-
-    if (!preferences.includes(themeId)) {
-      setPreferences((prev) => [...prev, themeId]);
+  const averageRating = useMemo(() => {
+    if (themes.length === 0) {
+      return 0;
     }
+
+    const total = themes.reduce((sum, theme) => sum + (ratings[theme.id] ?? 0), 0);
+    return total / themes.length;
+  }, [themes, ratings]);
+
+  const handleThemeRatingChange = (themeId: string, rawValue: string) => {
+    const parsed = Number.parseFloat(rawValue.replace(',', '.'));
+    const nextValue = normalizeRating(parsed);
+
+    setRatings((prev) => ({
+      ...prev,
+      [themeId]: nextValue,
+    }));
+    setError('');
   };
 
-  const handleRemovePreference = (themeId: string) => {
-    setPreferences(preferences.filter((id) => id !== themeId));
-  };
-
-  const handleMoveUp = (index: number) => {
-    if (index > 0) {
-      const newPrefs = [...preferences];
-      [newPrefs[index], newPrefs[index - 1]] = [newPrefs[index - 1], newPrefs[index]];
-      setPreferences(newPrefs);
-    }
-  };
-
-  const handleMoveDown = (index: number) => {
-    if (index < preferences.length - 1) {
-      const newPrefs = [...preferences];
-      [newPrefs[index], newPrefs[index + 1]] = [newPrefs[index + 1], newPrefs[index]];
-      setPreferences(newPrefs);
-    }
+  const handleResetRatings = () => {
+    setRatings(
+      themes.reduce<Record<string, number>>((acc, theme) => {
+        acc[theme.id] = 0;
+        return acc;
+      }, {})
+    );
+    setError('');
   };
 
   const handleSubmit = async () => {
@@ -105,8 +137,8 @@ export function StudentPreferencesPage() {
       return;
     }
 
-    if (preferences.length === 0) {
-      setError('Selecione pelo menos um tema');
+    if (themes.length === 0) {
+      setError('Nao ha temas disponiveis para avaliar');
       return;
     }
 
@@ -114,8 +146,9 @@ export function StudentPreferencesPage() {
       setSubmitting(true);
       setError('');
 
-      const prefsData = preferences.map((themeId, index) => ({
-        themeId,
+      // Traducao de nota -> rank (contrato atual do backend).
+      const prefsData = rankedThemes.map((theme, index) => ({
+        themeId: theme.id,
         rank: index + 1,
       }));
 
@@ -176,7 +209,7 @@ export function StudentPreferencesPage() {
             onClick={() => setSubmitSuccess(false)}
             className="mt-6 inline-flex items-center rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
           >
-            Revisar preferencias
+            Revisar notas
           </button>
         </div>
       </div>
@@ -187,42 +220,91 @@ export function StudentPreferencesPage() {
     <div className="min-h-screen bg-slate-50 py-10 px-4 sm:px-6 lg:px-8 font-sans">
       <div className="max-w-5xl mx-auto">
         <header className="mb-10 text-center">
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">Rankear Temas</h1>
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">Avaliar Temas</h1>
           <p className="text-slate-600 max-w-2xl mx-auto">
-            Arraste os temas da lista de disponiveis para a lista de preferencias. Organize-os na ordem de sua preferencia.
+            Atribua uma nota de -5 a +5 para cada tema (passo de 0.05). O sistema converte automaticamente as notas em ranking.
           </p>
         </header>
 
         <div className="grid md:grid-cols-2 gap-8">
           <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full">
             <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center">
-              <List className="h-5 w-5 text-slate-500 mr-2" />
-              <h2 className="text-lg font-medium text-slate-900">Temas Disponiveis</h2>
+              <ListChecks className="h-5 w-5 text-slate-500 mr-2" />
+              <h2 className="text-lg font-medium text-slate-900">Notas por Tema</h2>
             </div>
             <div className="p-6 flex-1 overflow-y-auto max-h-[600px] space-y-3">
-              {themes.filter((t) => !preferences.includes(t.id)).length === 0 ? (
+              {themes.length === 0 ? (
                 <div className="text-center py-10 text-slate-400">
-                  <p>Todos os temas foram selecionados</p>
+                  <p>Nenhum tema disponivel</p>
                 </div>
               ) : (
-                themes
-                  .filter((t) => !preferences.includes(t.id))
-                  .map((theme) => (
-                    <div
-                      key={theme.id}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, theme.id)}
-                      className="p-4 bg-white border border-slate-200 rounded-lg cursor-grab active:cursor-grabbing hover:border-blue-400 hover:shadow-sm transition-all group"
-                    >
-                      <div className="flex items-start">
-                        <GripVertical className="h-5 w-5 text-slate-400 mr-2 mt-0.5 flex-shrink-0" />
+                themes.map((theme) => {
+                  const rating = ratings[theme.id] ?? 0;
+                  const isDescriptionOpen = expandedThemeId === theme.id;
+                  const hasDescription = theme.description.trim().length > 0;
+                  const ratingBadgeClass =
+                    rating > 0
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : rating < 0
+                        ? 'bg-rose-100 text-rose-700'
+                        : 'bg-slate-100 text-slate-600';
+
+                  return (
+                    <div key={theme.id} className="p-4 bg-white border border-slate-200 rounded-lg">
+                      <div className="flex items-start justify-between gap-3">
                         <div>
-                          <h3 className="font-medium text-slate-900 group-hover:text-blue-600 transition-colors">{theme.name}</h3>
-                          <p className="text-sm text-slate-500 mt-1">{theme.description}</p>
+                          <h3 className="font-medium text-slate-900">{theme.name}</h3>
                         </div>
+                        <span className={`px-2.5 py-1 rounded-md text-xs font-semibold ${ratingBadgeClass}`}>
+                          {formatRating(rating)}
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setExpandedThemeId(isDescriptionOpen ? null : theme.id)}
+                        className="mt-3 w-full inline-flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-100 transition-colors"
+                        aria-expanded={isDescriptionOpen}
+                      >
+                        <span>{isDescriptionOpen ? 'Ocultar descricao' : 'Ver descricao'}</span>
+                        {isDescriptionOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      </button>
+
+                      {isDescriptionOpen && (
+                        <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                          {hasDescription ? theme.description : 'Sem descricao cadastrada para este tema.'}
+                        </div>
+                      )}
+
+                      <div className="mt-4 grid grid-cols-1 sm:grid-cols-[1fr_100px] gap-3 items-center">
+                        <input
+                          type="range"
+                          min={RATING_MIN}
+                          max={RATING_MAX}
+                          step={RATING_STEP}
+                          value={rating}
+                          onChange={(e) => handleThemeRatingChange(theme.id, e.target.value)}
+                          className="w-full accent-blue-600"
+                        />
+                        <input
+                          type="number"
+                          min={RATING_MIN}
+                          max={RATING_MAX}
+                          step={RATING_STEP}
+                          value={rating}
+                          onChange={(e) => handleThemeRatingChange(theme.id, e.target.value)}
+                          className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm text-right text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+
+                      <div className="mt-2 flex justify-between text-[11px] text-slate-400">
+                        <span>-5.00</span>
+                        <span>0.00</span>
+                        <span>+5.00</span>
                       </div>
                     </div>
-                  ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -230,76 +312,35 @@ export function StudentPreferencesPage() {
           <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full">
             <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
               <div className="flex items-center">
-                <CheckSquare className="h-5 w-5 text-blue-600 mr-2" />
-                <h2 className="text-lg font-medium text-slate-900">Minhas Preferencias</h2>
+                <ListChecks className="h-5 w-5 text-blue-600 mr-2" />
+                <h2 className="text-lg font-medium text-slate-900">Ranking Gerado</h2>
               </div>
               <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-blue-100 text-blue-800">
-                {preferences.length} selecionados
+                media {formatRating(averageRating)}
               </span>
             </div>
 
             <div className="p-6 flex-1 flex flex-col">
-              <div
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-                className={`flex-1 min-h-[300px] rounded-lg border-2 border-dashed transition-colors p-4 space-y-3 ${
-                  preferences.length === 0
-                    ? 'border-slate-300 bg-slate-50 flex items-center justify-center'
-                    : 'border-transparent'
-                }`}
-              >
-                {preferences.length === 0 ? (
-                  <div className="text-center text-slate-400">
-                    <p className="mb-2">Arraste os temas para esta area</p>
-                    <p className="text-xs">Ou clique nos temas para adicionar</p>
+              <div className="flex-1 min-h-[300px] rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-2 overflow-y-auto max-h-[460px]">
+                {rankedThemes.map((theme, index) => (
+                  <div
+                    key={theme.id}
+                    className="p-3 bg-white border border-slate-200 rounded-lg flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="flex-shrink-0 h-6 w-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">
+                        {index + 1}
+                      </span>
+                      <span className="font-medium text-slate-900 text-sm truncate">{theme.name}</span>
+                    </div>
+                    <span className="text-xs font-semibold text-slate-500">{formatRating(ratings[theme.id] ?? 0)}</span>
                   </div>
-                ) : (
-                  preferences.map((themeId, index) => {
-                    const theme = themes.find((t) => t.id === themeId);
-                    if (!theme) return null;
-
-                    return (
-                      <div
-                        key={themeId}
-                        className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between group hover:shadow-sm transition-all"
-                      >
-                        <div className="flex items-center flex-1 mr-4">
-                          <span className="flex-shrink-0 h-6 w-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center mr-3">
-                            {index + 1}
-                          </span>
-                          <span className="font-medium text-slate-900 text-sm">{theme.name}</span>
-                        </div>
-                        <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                          <button
-                            onClick={() => handleMoveUp(index)}
-                            disabled={index === 0}
-                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-white rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                            title="Mover para cima"
-                          >
-                            <ArrowUp className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleMoveDown(index)}
-                            disabled={index === preferences.length - 1}
-                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-white rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                            title="Mover para baixo"
-                          >
-                            <ArrowDown className="h-4 w-4" />
-                          </button>
-                          <div className="w-px h-4 bg-slate-300 mx-1"></div>
-                          <button
-                            onClick={() => handleRemovePreference(themeId)}
-                            className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-white rounded transition-colors"
-                            title="Remover"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
+                ))}
               </div>
+
+              <p className="mt-4 text-xs text-slate-500">
+                Maior nota recebe maior prioridade no ranking (rank 1).
+              </p>
 
               {error && (
                 <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center text-red-700 text-sm">
@@ -308,10 +349,20 @@ export function StudentPreferencesPage() {
                 </div>
               )}
 
-              <div className="mt-6 pt-6 border-t border-slate-100">
+              <div className="mt-6 pt-6 border-t border-slate-100 space-y-3">
+                <button
+                  type="button"
+                  onClick={handleResetRatings}
+                  disabled={submitting || themes.length === 0}
+                  className="w-full flex justify-center items-center py-2.5 px-4 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Zerar notas
+                </button>
+
                 <button
                   onClick={handleSubmit}
-                  disabled={submitting || preferences.length === 0}
+                  disabled={submitting || themes.length === 0}
                   className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-300 transition-colors"
                 >
                   {submitting ? (
