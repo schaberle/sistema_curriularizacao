@@ -10,7 +10,7 @@ Repositorio de trabalho para distribuicao automatica de alunos em grupos, com:
 ## Estado atual
 
 - Versao ativa para operacao: `v2/backend` + `v2/frontend`.
-- Pastas `v1/`, `backend/` e `frontend/` sao legadas.
+- Pastas legadas foram removidas do versionamento desta branch.
 - Backend v2 exige `SUPABASE_SERVICE_KEY` e `JWT_SECRET` forte.
 
 ## Estrutura relevante
@@ -20,8 +20,6 @@ Repositorio de trabalho para distribuicao automatica de alunos em grupos, com:
 |-- v2/
 |   |-- backend/                 # API Express + TypeScript + Supabase
 |   `-- frontend/                # React + Vite
-|-- supabase/migrations/         # SQL de schema e ajustes
-|-- scripts/setup-env.mjs        # Copia .env.example -> .env
 |-- package.json                 # Scripts de orquestracao
 `-- README.md
 ```
@@ -43,7 +41,13 @@ npm run install:all
 2. Gere arquivos `.env` a partir dos exemplos:
 
 ```bash
-npm run setup:env
+# PowerShell (Windows)
+Copy-Item v2/backend/.env.example v2/backend/.env
+Copy-Item v2/frontend/.env.example v2/frontend/.env
+
+# Bash (Linux/macOS)
+cp v2/backend/.env.example v2/backend/.env
+cp v2/frontend/.env.example v2/frontend/.env
 ```
 
 3. Preencha os `.env`:
@@ -154,11 +158,10 @@ $$
 ### 2) Energia de grupo (fase 1)
 
 $$
-E_{grupo}(g,t)=
-\begin{cases}
-\infty, & g\ \text{inviavel}\\
-E_{pref}(g,t)+E_{fase}(g), & g\ \text{viavel}
-\end{cases}
+\begin{aligned}
+E_{grupo}(g,t) &= \infty && \text{se } g \text{ for inviavel} \\
+E_{grupo}(g,t) &= E_{pref}(g,t)+E_{fase}(g) && \text{caso contrario}
+\end{aligned}
 $$
 
 #### 2.1 Componente de preferencia
@@ -209,19 +212,21 @@ groupSize-1 \le |g| \le groupSize+1,\quad groupSize=4
 $$
 
 $$
-EE(g)\ge minEE,\quad EE(g)\le maxEE_{aj}(g)
+EE(g)\ge \operatorname{minEE},\quad EE(g)\le \operatorname{maxEE}_{\mathrm{aj}}(g)
 $$
 
 $$
-maxEE_{aj}(g)=
-\begin{cases}
-maxEE, & |g|\ge groupSize\\
-\min(maxEE,|g|-1), & |g|<groupSize
-\end{cases}
+\operatorname{maxEE}_{\mathrm{aj}}(g)=
+\left\{
+\begin{array}{ll}
+\operatorname{maxEE}, & |g|\ge \operatorname{groupSize} \\
+\min(\operatorname{maxEE},|g|-1), & |g|<\operatorname{groupSize}
+\end{array}
+\right.
 $$
 
 $$
-|\text{fases distintas em }g|\ge minPhaseDiversity
+\left|\operatorname{phases}(g)\right|\ge \operatorname{minPhaseDiversity}
 $$
 
 Defaults: `minEE=1`, `maxEE=2`, `minPhaseDiversity=2`.
@@ -256,13 +261,13 @@ Matriz simetrica de afinidade: $A_{ij}\in[-1,1]$.
 Coesao de grupo:
 
 $$
-cohesion(g)=\sum_{i<j,\ i,j\in g} A_{ij}
+\operatorname{cohesion}(g)=\sum_{\substack{i,j\in g\\i<j}} A_{ij}
 $$
 
 Energia social:
 
 $$
-E_{soc}(g)=-w_{soc}\cdot cohesion(g)
+E_{\mathrm{soc}}(g)=-w_{\mathrm{soc}}\cdot \operatorname{cohesion}(g)
 $$
 
 Default: $w_{soc}=1.0$.
@@ -270,7 +275,7 @@ Default: $w_{soc}=1.0$.
 Objetivo da fase 2:
 
 $$
-E_{fase2}=\sum_{g\in G}\left(E_{grupo}(g,\tau(g))+E_{soc}(g)\right)
+E_{\mathrm{fase2}}=\sum_{g\in G}\left(E_{grupo}(g,\tau(g))+E_{\mathrm{soc}}(g)\right)
 $$
 
 Selecao guiada por isolamento:
@@ -381,10 +386,9 @@ flowchart LR
 
 ## Banco de dados
 
-Migrations SQL em: `supabase/migrations/`
-
-Ajustes recentes incluem hardening de seguranca e flags de execucao por fase.
+As migrations SQL nao estao versionadas neste repositorio.
+O schema operacional e mantido no projeto Supabase alvo.
 
 ## Observacao sobre conteudo legado
 
-Pastas legadas continuam no repositorio por historico tecnico. A operacao ativa deve considerar o fluxo v2.
+Neste branch, o versionamento foi reduzido para o fluxo ativo v2.
