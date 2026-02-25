@@ -32,8 +32,12 @@
 **/*.log
 **/*.tmp
 **/*.tsbuildinfo
-**/package-lock.json
 **/yarn.lock
+
+# Keep lockfiles required by CI/deploy reproducibility
+!package-lock.json
+!v2/backend/package-lock.json
+!v2/frontend/package-lock.json
 
 # Environment and secrets
 **/.env

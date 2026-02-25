@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "scripts": {
     "install:all": "npm install && npm --prefix v1/backend install && npm --prefix v1/frontend install && npm --prefix v2/backend install && npm --prefix v2/frontend install",
+    "build": "npm --prefix v2/backend ci --include=dev && npm --prefix v2/backend run build",
     "setup:env": "node scripts/setup-env.mjs",
     "dev:v1:backend": "npm --prefix v1/backend run dev",
     "dev:v1:frontend": "npm --prefix v1/frontend run dev",
