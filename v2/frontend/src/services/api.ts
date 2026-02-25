@@ -704,7 +704,7 @@ class APIClient {
 
   async createStudentSession(
     distributionId: string,
-    data: { matricula?: string; name?: string; course?: string; phase?: number }
+    data: { matricula: string }
   ) {
     const response = await this.client.post(`/api/students/${distributionId}/session`, data);
     const payload = response.data?.data;
@@ -817,12 +817,11 @@ class APIClient {
   }
 
   async importStudentRegistry(
-    distributionId: string,
-    payload: { students?: Array<{ name: string; course: 'EE' | 'ME'; phase: number; matricula: string }>; csv?: string }
+    distributionId: string
   ) {
     const response = await this.client.post(
       `/api/organizer/distributions/${distributionId}/student-registry/import`,
-      payload
+      {}
     );
     return response.data;
   }
@@ -831,6 +830,11 @@ class APIClient {
     const response = await this.client.get(
       `/api/organizer/distributions/${distributionId}/student-registry/status`
     );
+    return response.data;
+  }
+
+  async syncStudentRegistryAllDistributions() {
+    const response = await this.client.post('/api/organizer/student-registry/sync-all');
     return response.data;
   }
 

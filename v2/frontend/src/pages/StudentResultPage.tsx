@@ -5,19 +5,13 @@ import api from '../services/api';
 import { StudentDistributionAccess } from '../types/student.types';
 
 /**
- * StudentResultPage - Consulta de resultado via sessao autenticada de aluno
+ * StudentResultPage - Consulta de resultado via sessao autenticada por matricula.
  */
 export function StudentResultPage() {
   const { distributionId } = useParams<{ distributionId: string }>();
   const navigate = useNavigate();
-  const isDevLegacyModeEnabled =
-    import.meta.env.DEV &&
-    String(import.meta.env.VITE_DEV_ALLOW_LEGACY_STUDENT_SESSION || '').toLowerCase() === 'true';
 
-  const [name, setName] = useState('');
   const [matricula, setMatricula] = useState('');
-  const [course, setCourse] = useState<'EE' | 'ME'>('EE');
-  const [phase, setPhase] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<any>(null);
@@ -27,26 +21,10 @@ export function StudentResultPage() {
 
   const buildSessionPayload = () => {
     const normalizedMatricula = matricula.trim();
-    const normalizedName = name.trim();
-
-    if (normalizedMatricula) {
-      return {
-        matricula: normalizedMatricula,
-        name: normalizedName || undefined,
-        course,
-        phase,
-      };
+    if (!normalizedMatricula) {
+      return null;
     }
-
-    if (isDevLegacyModeEnabled && normalizedName) {
-      return {
-        name: normalizedName,
-        course,
-        phase,
-      };
-    }
-
-    return null;
+    return { matricula: normalizedMatricula };
   };
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -62,11 +40,7 @@ export function StudentResultPage() {
 
     const sessionPayload = buildSessionPayload();
     if (!sessionPayload) {
-      setError(
-        isDevLegacyModeEnabled
-          ? 'Informe matricula ou nome (modo DEV).'
-          : 'Preencha a matricula'
-      );
+      setError('Preencha a matricula');
       return;
     }
 
@@ -143,16 +117,14 @@ export function StudentResultPage() {
           </div>
           <h1 className="text-3xl font-bold text-slate-900">Consultar resultado</h1>
           <p className="mt-2 text-slate-600">
-            {isDevLegacyModeEnabled
-              ? 'Use matricula (padrao) ou fallback legado em modo DEV para abrir a sessao.'
-              : 'Informe sua matricula para abrir uma sessao e consultar seu grupo.'}
+            Informe sua matricula para abrir uma sessao e consultar seu grupo.
           </p>
         </div>
 
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-8 mb-8">
           <form onSubmit={handleSearch} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Matricula</label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Matricula (RA)</label>
               <input
                 type="text"
                 value={matricula}
@@ -160,67 +132,9 @@ export function StudentResultPage() {
                 className="block w-full sm:text-sm border-slate-300 rounded-md focus:ring-blue-500 focus:border-blue-500 p-2.5 border"
                 placeholder="Ex: 202412345"
                 disabled={loading}
-                required={!isDevLegacyModeEnabled}
+                required
               />
             </div>
-
-            {isDevLegacyModeEnabled && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                Modo DEV legado ativo: se matricula estiver vazia, a sessao usa nome/curso/fase.
-              </div>
-            )}
-
-            {isDevLegacyModeEnabled && (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Seu nome completo (fallback DEV)</label>
-                  <div className="relative rounded-md shadow-sm">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <User className="h-5 w-5 text-slate-400" />
-                    </div>
-                    <input
-                      type="text"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className="block w-full pl-10 sm:text-sm border-slate-300 rounded-md focus:ring-blue-500 focus:border-blue-500 p-2.5 border"
-                      placeholder="Ex: Joao Silva"
-                      disabled={loading}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Curso (fallback DEV)</label>
-                    <select
-                      value={course}
-                      onChange={(e) => setCourse(e.target.value as 'EE' | 'ME')}
-                      className="block w-full sm:text-sm border-slate-300 rounded-md focus:ring-blue-500 focus:border-blue-500 p-2.5 border"
-                      disabled={loading}
-                    >
-                      <option value="EE">Engenharia Eletrica (EE)</option>
-                      <option value="ME">Engenharia Mecanica (ME)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Fase (fallback DEV)</label>
-                    <select
-                      value={phase}
-                      onChange={(e) => setPhase(Number.parseInt(e.target.value, 10))}
-                      className="block w-full sm:text-sm border-slate-300 rounded-md focus:ring-blue-500 focus:border-blue-500 p-2.5 border"
-                      disabled={loading}
-                    >
-                      {Array.from({ length: 10 }, (_, index) => (
-                        <option key={index + 1} value={index + 1}>
-                          Fase {index + 1}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </>
-            )}
 
             {error && searched && (
               <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center text-red-700 text-sm">

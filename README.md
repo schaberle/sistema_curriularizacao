@@ -116,9 +116,11 @@ Base URL local: `http://localhost:4300`
 - `GET /api/auth/verify`
 - `GET /api/themes`
 - `GET /api/search/*`
-- `POST /api/students/:distributionId`
+- `POST /api/students/:distributionId/session`
 - `PUT /api/students/me/preferences`
 - `GET /api/students/me/current-group`
+- `POST /api/organizer/distributions/:distributionId/student-registry/import`
+- `POST /api/organizer/student-registry/sync-all`
 - `POST /api/organizer/distributions/:distributionId/execute-phase1`
 - `POST /api/organizer/distributions/:distributionId/execute-phase2`
 - `POST /api/organizer/distributions/:distributionId/simulation/runs/start-phase1`
@@ -393,6 +395,13 @@ flowchart LR
 
 As migrations SQL nao estao versionadas neste repositorio.
 O schema operacional e mantido no projeto Supabase alvo.
+
+### Registro oficial de alunos (RA com hash LGPD)
+
+- Fonte preferencial de bootstrap: planilha local `Levantamento*.xls` (quando presente).
+- Apos carga inicial no banco, o sistema pode operar sem a planilha:
+  novas sincronizacoes usam `student_registry` como fonte canonicamente.
+- RA nao e persistido em texto puro; somente `matricula_hash`.
 
 ## Observacao sobre conteudo legado
 

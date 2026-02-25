@@ -47,6 +47,26 @@ export function Step6_AffinitiesCollectionPage() {
     }
   };
 
+  const handleEnabledChange = async (enabled: boolean) => {
+    actions.setPhase2Enabled(enabled);
+
+    try {
+      await actions.configurePhase2(distributionId, {
+        enabled,
+        wSoc: phase2Config.wSoc,
+        maxIterations: phase2Config.maxIterations,
+        temperature: phase2Config.temperature,
+      });
+    } catch {
+      addToast({
+        type: 'warning',
+        message: enabled
+          ? 'Nao foi possivel abrir a Fase 2 no backend.'
+          : 'Nao foi possivel fechar a Fase 2 no backend.',
+      });
+    }
+  };
+
   return (
     <Phase2AffinitiesView
       statistics={statistics}
@@ -55,7 +75,7 @@ export function Step6_AffinitiesCollectionPage() {
         fetchStatistics: loading.fetchStatistics || false,
         generateAffinities: loading.generateAffinities || false,
       }}
-      onEnabledChange={actions.setPhase2Enabled}
+      onEnabledChange={handleEnabledChange}
       onRefresh={() => actions.fetchStatistics(distributionId)}
       onGenerateAffinities={handleGenerateAffinities}
       onPrevious={() => navigate(`/organizer/${distributionId}/step5-phase1-results`)}

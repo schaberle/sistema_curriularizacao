@@ -6,7 +6,6 @@
 import { Statistics } from '../../../types/distribution.types';
 import { Card } from '../../common/Card';
 import { Button } from '../../common/Button';
-import { SeedDataSection } from '../sections/SeedDataSection';
 import { StatisticsSection } from '../sections/StatisticsSection';
 import { StudentLinkSection } from '../sections/StudentLinkSection';
 
@@ -15,9 +14,7 @@ interface DataCollectionViewProps {
   distributionLink: string;
   loading: {
     fetchStatistics: boolean;
-    generateSeed: boolean;
   };
-  onGenerateSeed: (count: number) => Promise<void>;
   onRefreshStatistics?: () => void;
   onNext: () => void;
   onPrevious: () => void;
@@ -27,7 +24,6 @@ export function DataCollectionView({
   statistics,
   distributionLink,
   loading,
-  onGenerateSeed,
   onRefreshStatistics,
   onNext,
   onPrevious,
@@ -41,12 +37,12 @@ export function DataCollectionView({
       <header className="space-y-2">
         <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">Coleta de dados</h2>
         <p className="max-w-3xl text-sm text-slate-600">
-          Compartilhe o link com a turma e acompanhe o progresso em tempo real. Use dados simulados apenas quando quiser testar rapidamente.
+          Compartilhe o link com a turma e acompanhe o progresso em tempo real. O sistema aceita apenas alunos da lista oficial.
         </p>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
-        <div className="space-y-6">
+        <div className="space-y-6 lg:col-span-2">
           <Card title="Link para alunos" subtitle="Copie e compartilhe" padding="lg">
             <StudentLinkSection
               distributionLink={distributionLink}
@@ -67,25 +63,15 @@ export function DataCollectionView({
             />
           </Card>
         </div>
-
-        <div>
-          <Card title="Dados de teste" subtitle="Opcional" padding="lg">
-            <SeedDataSection
-              onGenerateSeed={onGenerateSeed}
-              loading={loading.generateSeed}
-              currentStudentCount={totalStudents}
-            />
-          </Card>
-        </div>
       </div>
 
       <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
-        <Button variant="outline" onClick={onPrevious} disabled={loading.generateSeed || loading.fetchStatistics}>
+        <Button variant="outline" onClick={onPrevious} disabled={loading.fetchStatistics}>
           Voltar
         </Button>
 
         {canProceed ? (
-          <Button variant="primary" onClick={onNext} disabled={loading.generateSeed || loading.fetchStatistics}>
+          <Button variant="primary" onClick={onNext} disabled={loading.fetchStatistics}>
             Proximo
           </Button>
         ) : (

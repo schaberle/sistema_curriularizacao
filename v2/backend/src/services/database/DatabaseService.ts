@@ -1,13 +1,13 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Student, Theme, Group, Solution } from '../../domain';
 import { createResilientFetch } from '../supabase/resilientFetch';
+import { mapOrigemAlunoToCourse } from '../registry/officialRegistry.utils';
 
-type StudentRegistryImportEntry = {
+export type StudentRegistryImportEntry = {
   distributionId: string;
-  name: string;
-  nameNormalized: string;
-  course: string;
-  phase: number;
+  academico: string;
+  origemAluno: string;
+  faseTurma: number;
   matriculaHash: string;
   active?: boolean;
 };
@@ -18,6 +18,20 @@ type StudentRegistryStatus = {
   activeRows: number;
   inactiveRows: number;
   lastUpdatedAt: string | null;
+};
+
+export type StudentRegistryTemplateRow = {
+  academico: string;
+  origemAluno: string;
+  faseTurma: number;
+  matriculaHash: string;
+};
+
+export type ActiveStudentRegistryEntry = {
+  academico: string;
+  origemAluno: string;
+  faseTurma: number;
+  matriculaHash: string;
 };
 
 /**
@@ -144,6 +158,23 @@ export class DatabaseService {
     }
 
     return data || [];
+  }
+
+  /**
+   * Lista todas as distribuicoes do sistema.
+   * Usado para sincronizacao global do registro oficial de alunos.
+   */
+  async getAllDistributions(): Promise<Array<{ id: string; organizer_id: string | null }>> {
+    const { data, error } = await this.client
+      .from('distributions')
+      .select('id, organizer_id')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw error;
+    }
+
+    return (data || []) as Array<{ id: string; organizer_id: string | null }>;
   }
 
   /**
@@ -632,10 +663,9 @@ export class DatabaseService {
 
     const payload = Array.from(incomingByHash.values()).map((entry) => ({
       distribution_id: entry.distributionId,
-      name: entry.name,
-      name_normalized: entry.nameNormalized,
-      course: entry.course,
-      phase: entry.phase,
+      academico: entry.academico,
+      origem_aluno: entry.origemAluno,
+      fase_turma: entry.faseTurma,
       matricula_hash: entry.matriculaHash,
       active: entry.active ?? true,
       updated_at: nowIso,
@@ -713,6 +743,91 @@ export class DatabaseService {
       inactiveRows: rows.length - activeRows,
       lastUpdatedAt,
     };
+  }
+
+  async getActiveStudentRegistryEntries(distributionId: string): Promise<ActiveStudentRegistryEntry[]> {
+    const { data, error } = await this.client
+      .from('student_registry')
+      .select('academico, origem_aluno, fase_turma, matricula_hash')
+      .eq('distribution_id', distributionId)
+      .eq('active', true);
+    if (error) {
+      throw error;
+    }
+
+    return (data || [])
+      .map((row: any) => ({
+        academico: String(row.academico || '').trim(),
+        origemAluno: String(row.origem_aluno || '').trim(),
+        faseTurma: Number(row.fase_turma),
+        matriculaHash: String(row.matricula_hash || '').trim().toLowerCase(),
+      }))
+      .filter((row) =>
+        row.academico.length > 0 &&
+        row.origemAluno.length > 0 &&
+        Number.isInteger(row.faseTurma) &&
+        row.faseTurma >= 1 &&
+        row.faseTurma <= 10 &&
+        row.matriculaHash.length > 0
+      );
+  }
+
+  /**
+   * Retorna uma lista-canonica de alunos oficiais a partir do banco.
+   * Seleciona a distribuicao com maior numero de alunos ativos no student_registry.
+   */
+  async getStudentRegistryTemplateRows(): Promise<StudentRegistryTemplateRow[]> {
+    const { data, error } = await this.client
+      .from('student_registry')
+      .select('distribution_id, academico, origem_aluno, fase_turma, matricula_hash')
+      .eq('active', true);
+    if (error) {
+      throw error;
+    }
+
+    const rows = data || [];
+    if (!rows.length) {
+      return [];
+    }
+
+    const countsByDistribution = new Map<string, number>();
+    for (const row of rows) {
+      const distributionId = String(row.distribution_id || '');
+      if (!distributionId) {
+        continue;
+      }
+      countsByDistribution.set(distributionId, (countsByDistribution.get(distributionId) || 0) + 1);
+    }
+
+    let selectedDistributionId = '';
+    let maxCount = -1;
+    for (const [distributionId, count] of countsByDistribution.entries()) {
+      if (count > maxCount) {
+        maxCount = count;
+        selectedDistributionId = distributionId;
+      }
+    }
+
+    if (!selectedDistributionId) {
+      return [];
+    }
+
+    return rows
+      .filter((row: any) => String(row.distribution_id || '') === selectedDistributionId)
+      .map((row: any) => ({
+        academico: String(row.academico || ''),
+        origemAluno: String(row.origem_aluno || ''),
+        faseTurma: Number(row.fase_turma),
+        matriculaHash: String(row.matricula_hash || ''),
+      }))
+      .filter((row) =>
+        row.academico.length > 0 &&
+        row.origemAluno.length > 0 &&
+        Number.isInteger(row.faseTurma) &&
+        row.faseTurma >= 1 &&
+        row.faseTurma <= 10 &&
+        row.matriculaHash.length > 0
+      );
   }
 
   async findStudentRegistryByMatriculaHash(
@@ -1297,8 +1412,8 @@ export class DatabaseService {
     // Resultado abre quando grupos existem (apos Fase 1).
     const resultsAvailable = groupsCreated;
 
-    // Afinidades abertas apos Fase 1 e fechadas apos execucao da Fase 2.
-    const affinitiesOpen = groupsCreated && !phase2Executed && status !== 'PHASE2_EXECUTING';
+    // Afinidades so abrem quando o organizador habilita explicitamente a Fase 2.
+    const affinitiesOpen = groupsCreated && status === 'PHASE2' && !phase2Executed;
 
     return {
       distributionId,
@@ -1574,7 +1689,53 @@ export class DatabaseService {
     affinityCompletionRate: number;
     phase1Executed: boolean;
   }> {
-    // 1. Buscar todos os alunos da distribuição
+    // 1. Registro oficial ativo define o total esperado de alunos.
+    const { data: registryRows, error: registryError } = await this.client
+      .from('student_registry')
+      .select('origem_aluno, fase_turma')
+      .eq('distribution_id', distributionId)
+      .eq('active', true);
+
+    if (registryError) {
+      throw registryError;
+    }
+
+    let totalStudents = (registryRows || []).length;
+    let courseBreakdown: { course: string; count: number }[] = [];
+    let phaseBreakdown: { phase: number; count: number }[] = [];
+
+    if (totalStudents > 0) {
+      const courseCounts: { [key: string]: number } = {};
+      const phaseCounts: { [key: number]: number } = {};
+
+      for (const row of registryRows || []) {
+        const mappedCourse = mapOrigemAlunoToCourse(String((row as any).origem_aluno || ''));
+        if (mappedCourse) {
+          courseCounts[mappedCourse] = (courseCounts[mappedCourse] || 0) + 1;
+        }
+
+        const phase = Number((row as any).fase_turma);
+        if (Number.isInteger(phase) && phase >= 1 && phase <= 10) {
+          phaseCounts[phase] = (phaseCounts[phase] || 0) + 1;
+        }
+      }
+
+      courseBreakdown = Object.entries(courseCounts)
+        .map(([course, count]) => ({
+          course,
+          count,
+        }))
+        .sort((a, b) => a.course.localeCompare(b.course));
+
+      phaseBreakdown = Object.entries(phaseCounts)
+        .map(([phase, count]) => ({
+          phase: parseInt(phase, 10),
+          count,
+        }))
+        .sort((a, b) => a.phase - b.phase);
+    }
+
+    // 2. Alunos operacionais representam quem de fato respondeu no fluxo.
     const { data: students, error: studentsError } = await this.client
       .from('students')
       .select('id, course, phase')
@@ -1584,79 +1745,72 @@ export class DatabaseService {
       throw studentsError;
     }
 
-    const totalStudents = students?.length || 0;
-
-    // Retorna estrutura vazia se nenhum aluno
+    // Fallback legado para distribuicoes antigas sem student_registry carregado.
     if (totalStudents === 0) {
-      return {
-        totalStudents: 0,
-        studentsWithPreferences: 0,
-        studentsWithAffinities: 0,
-        courseBreakdown: [],
-        phaseBreakdown: [],
-        preferenceCompletionRate: 0,
-        affinityCompletionRate: 0,
-        phase1Executed: false,
-      };
+      totalStudents = students?.length || 0;
+
+      const legacyCourseCounts: { [key: string]: number } = {};
+      const legacyPhaseCounts: { [key: number]: number } = {};
+
+      (students || []).forEach((s: any) => {
+        legacyCourseCounts[s.course] = (legacyCourseCounts[s.course] || 0) + 1;
+        legacyPhaseCounts[s.phase] = (legacyPhaseCounts[s.phase] || 0) + 1;
+      });
+
+      courseBreakdown = Object.entries(legacyCourseCounts)
+        .map(([course, count]) => ({
+          course,
+          count,
+        }))
+        .sort((a, b) => a.course.localeCompare(b.course));
+
+      phaseBreakdown = Object.entries(legacyPhaseCounts)
+        .map(([phase, count]) => ({
+          phase: parseInt(phase, 10),
+          count,
+        }))
+        .sort((a, b) => a.phase - b.phase);
     }
 
-    const studentIds = students!.map(s => s.id);
+    const studentIds = (students || []).map((s: any) => s.id);
+    let studentsWithPreferences = 0;
+    let studentsWithAffinities = 0;
 
-    // 2. Buscar alunos que completaram preferências
-    const { data: preferencesData, error: prefsError } = await this.client
-      .from('student_preferences')
-      .select('student_id')
-      .in('student_id', studentIds);
+    if (studentIds.length > 0) {
+      const { data: preferencesData, error: prefsError } = await this.client
+        .from('student_preferences')
+        .select('student_id')
+        .in('student_id', studentIds);
 
-    if (prefsError) {
-      throw prefsError;
+      if (prefsError) {
+        throw prefsError;
+      }
+
+      const studentsWithPrefsSet = new Set(preferencesData?.map((p: any) => p.student_id) || []);
+      studentsWithPreferences = studentsWithPrefsSet.size;
+
+      const { data: affinitiesData, error: affError } = await this.client
+        .from('student_affinities')
+        .select('student_id')
+        .in('student_id', studentIds);
+
+      if (affError) {
+        throw affError;
+      }
+
+      const studentsWithAffinitiesSet = new Set(affinitiesData?.map((a: any) => a.student_id) || []);
+      studentsWithAffinities = studentsWithAffinitiesSet.size;
     }
 
-    const studentsWithPrefsSet = new Set(preferencesData?.map(p => p.student_id) || []);
-    const studentsWithPreferences = studentsWithPrefsSet.size;
+    const safeTotalStudents = Math.max(0, totalStudents);
+    const boundedStudentsWithPreferences = Math.min(studentsWithPreferences, safeTotalStudents);
+    const boundedStudentsWithAffinities = Math.min(studentsWithAffinities, safeTotalStudents);
 
-    // 3. Buscar alunos que completaram afinidades
-    const { data: affinitiesData, error: affError } = await this.client
-      .from('student_affinities')
-      .select('student_id')
-      .in('student_id', studentIds);
+    const preferenceCompletionRate =
+      safeTotalStudents > 0 ? (boundedStudentsWithPreferences / safeTotalStudents) * 100 : 0;
+    const affinityCompletionRate =
+      safeTotalStudents > 0 ? (boundedStudentsWithAffinities / safeTotalStudents) * 100 : 0;
 
-    if (affError) {
-      throw affError;
-    }
-
-    const studentsWithAffinitiesSet = new Set(affinitiesData?.map(a => a.student_id) || []);
-    const studentsWithAffinities = studentsWithAffinitiesSet.size;
-
-    // 4. Breakdown por curso
-    const courseCounts: { [key: string]: number } = {};
-    students!.forEach(s => {
-      courseCounts[s.course] = (courseCounts[s.course] || 0) + 1;
-    });
-    const courseBreakdown = Object.entries(courseCounts)
-      .map(([course, count]) => ({
-        course,
-        count,
-      }))
-      .sort((a, b) => a.course.localeCompare(b.course));
-
-    // 5. Breakdown por fase
-    const phaseCounts: { [key: number]: number } = {};
-    students!.forEach(s => {
-      phaseCounts[s.phase] = (phaseCounts[s.phase] || 0) + 1;
-    });
-    const phaseBreakdown = Object.entries(phaseCounts)
-      .map(([phase, count]) => ({
-        phase: parseInt(phase),
-        count,
-      }))
-      .sort((a, b) => a.phase - b.phase);
-
-    // 6. Calcular taxas de conclusão
-    const preferenceCompletionRate = (studentsWithPreferences / totalStudents) * 100;
-    const affinityCompletionRate = (studentsWithAffinities / totalStudents) * 100;
-
-    // 7. Verificar se Fase 1 foi executada
     const { data: distributionData } = await this.client
       .from('distributions')
       .select('status')
@@ -1667,9 +1821,9 @@ export class DatabaseService {
       .includes(String(distributionData?.status || '').toUpperCase());
 
     return {
-      totalStudents,
-      studentsWithPreferences,
-      studentsWithAffinities,
+      totalStudents: safeTotalStudents,
+      studentsWithPreferences: boundedStudentsWithPreferences,
+      studentsWithAffinities: boundedStudentsWithAffinities,
       courseBreakdown,
       phaseBreakdown,
       preferenceCompletionRate,
@@ -1677,10 +1831,6 @@ export class DatabaseService {
       phase1Executed,
     };
   }
-
-  /**
-   * Busca grupos formados de uma distribuição com detalhes de membros
-   */
   async getDistributionGroups(distributionId: string): Promise<any[]> {
     const { data: groups, error: groupsError } = await this.client
       .from('groups')
@@ -1778,3 +1928,4 @@ export class DatabaseService {
     }
   }
 }
+

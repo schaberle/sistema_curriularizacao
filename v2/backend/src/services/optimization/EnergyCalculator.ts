@@ -82,6 +82,11 @@ export class EnergyCalculator {
     let totalNormalizedScore = 0;
 
     for (const student of group.students) {
+      // Sem preferencias preenchidas => impacto neutro no termo de preferencia.
+      if (!student.preferences || student.preferences.length === 0) {
+        continue;
+      }
+
       const rank = this.getThemeRank(student, theme.id);
       const rawScore = this.rankToRawScore(rank);
       const normalizedScore = this.normalizeScore(student, rawScore);

@@ -1,12 +1,17 @@
-import crypto from 'crypto';
-import { NextFunction, Request, Response, Router } from 'express';
+import { Request, Response, Router } from 'express';
 import { asyncHandler } from '../middleware/error.middleware';
 import { sendPublicError } from '../middleware/publicError.middleware';
 import { createStudentAuthMiddleware, getStudentAuthFromRequest } from '../middleware/studentAuth.middleware';
 import { getRequestIp, getRequestUserAgent } from '../middleware/security.middleware';
-import { validateStudentPreferences, validateStudentRegistration } from '../middleware/validation.middleware';
+import { validateStudentPreferences } from '../middleware/validation.middleware';
 import { StudentSessionService } from '../services/auth/StudentSessionService';
 import { DatabaseService } from '../services/database/DatabaseService';
+import {
+  buildOperationalStudentId,
+  hashMatricula,
+  mapOrigemAlunoToCourse,
+  normalizeMatricula,
+} from '../services/registry/officialRegistry.utils';
 
 function clampNormalized(value: number): number {
   return Math.max(-1, Math.min(1, value));
@@ -19,18 +24,12 @@ function toNormalizedAffinity(value: number): number {
   return clampNormalized(value / 100);
 }
 
-function normalizeMatricula(value: string): string {
-  return String(value || '')
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '');
-}
-
-function hashMatricula(matricula: string, pepper: string): string {
-  return crypto
-    .createHash('sha256')
-    .update(`${normalizeMatricula(matricula)}:${pepper}`)
-    .digest('hex');
+function toStoredAffinityLevel(value: number): -1 | 0 | 1 {
+  const normalized = toNormalizedAffinity(value);
+  const rounded = Math.round(normalized);
+  if (rounded > 0) return 1;
+  if (rounded < 0) return -1;
+  return 0;
 }
 
 function getAccessMessage(
@@ -126,17 +125,11 @@ export function createStudentRoutes(
 ): Router {
   const router = Router();
   const studentAuthMiddleware = createStudentAuthMiddleware(database, studentSessionService);
-  const isProduction = String(process.env.NODE_ENV || 'development').toLowerCase() === 'production';
-  const legacyStudentSessionEnabled =
-    !isProduction &&
-    String(process.env.DEV_ALLOW_LEGACY_STUDENT_SESSION || '').toLowerCase() === 'true';
   const registryPepper = String(process.env.STUDENT_REGISTRY_PEPPER || '').trim();
 
-  if (isProduction && !registryPepper) {
-    throw new Error('STUDENT_REGISTRY_PEPPER obrigatoria em producao');
+  if (!registryPepper) {
+    throw new Error('STUDENT_REGISTRY_PEPPER obrigatoria');
   }
-
-  const effectiveRegistryPepper = registryPepper || 'dev-only-student-registry-pepper';
 
   router.get(
     '/distribution/:distributionId/access',
@@ -150,60 +143,16 @@ export function createStudentRoutes(
 
   /**
    * POST /api/students/:distributionId
-   * Registro + emissao imediata de sessao de aluno.
+   * Endpoint legado descontinuado.
    */
   router.post(
     '/:distributionId',
-    (req: Request, res: Response, next: NextFunction) => {
-      if (isProduction) {
-        return sendPublicError(req, res, {
-          status: 403,
-          errorCode: 'FORBIDDEN',
-          message: 'Cadastro direto de aluno bloqueado em producao',
-        });
-      }
-
-      return next();
-    },
-    validateStudentRegistration,
     asyncHandler(async (req: Request, res: Response) => {
-      const distributionId = req.params.distributionId as string;
-      const { name, course, phase } = req.body as {
-        name: string;
-        course: string;
-        phase: number;
-      };
-
-      const distribution = await database.getDistribution(distributionId);
-      if (!distribution) {
-        return sendPublicError(req, res, {
-          status: 404,
-          errorCode: 'NOT_FOUND',
-          message: 'Distribuicao nao encontrada',
-        });
-      }
-
-      const access = await database.getStudentAccessState(distributionId);
-      if (!access.registrationOpen) {
-        return sendPublicError(req, res, {
-          status: 403,
-          errorCode: 'FORBIDDEN',
-          message: getAccessMessage(access, 'registration'),
-          details: { data: access },
-        });
-      }
-
-      const studentId = await database.createStudent(name, course, phase, distributionId);
-      const student = await database.getStudent(studentId);
-      if (!student) {
-        return sendPublicError(req, res, {
-          status: 500,
-          errorCode: 'INTERNAL_ERROR',
-          message: 'Falha ao inicializar sessao do aluno',
-        });
-      }
-
-      return createStudentSessionResponse(req, res, database, studentSessionService, student);
+      return sendPublicError(req, res, {
+        status: 410,
+        errorCode: 'VALIDATION_FAILED',
+        message: 'Cadastro direto descontinuado. Informe matricula em /api/students/:distributionId/session',
+      });
     })
   );
 
@@ -215,11 +164,6 @@ export function createStudentRoutes(
     '/:distributionId/session',
     asyncHandler(async (req: Request, res: Response) => {
       const distributionId = req.params.distributionId as string;
-      const { name, course, phase } = req.body as {
-        name: string;
-        course: string;
-        phase: number;
-      };
       const matricula = normalizeMatricula(String(req.body?.matricula || ''));
 
       const distribution = await database.getDistribution(distributionId);
@@ -231,142 +175,82 @@ export function createStudentRoutes(
         });
       }
 
-      if (matricula) {
-        const registryEntry = await database.findStudentRegistryByMatriculaHash(
-          distributionId,
-          hashMatricula(matricula, effectiveRegistryPepper)
-        );
-
-        if (!registryEntry) {
-          try {
-            await database.logSecurityAuditEvent({
-              actorType: 'anonymous',
-              eventType: 'student_registry_lookup_failed',
-              path: `${req.baseUrl || ''}${req.path || ''}` || req.path,
-              method: req.method,
-              statusCode: 401,
-              ipAddress: getRequestIp(req),
-              userAgent: getRequestUserAgent(req),
-              metadata: {
-                distributionId,
-              },
-            });
-          } catch {
-            // Nao interrompe resposta por falha de auditoria.
-          }
-
-          return sendPublicError(req, res, {
-            status: 401,
-            errorCode: 'AUTH_INVALID',
-            message: 'Nao foi possivel validar a identidade do aluno',
-          });
-        }
-
-        const profile = {
-          name: String(registryEntry.name || ''),
-          course: String(registryEntry.course || '').toUpperCase(),
-          phase: Number(registryEntry.phase),
-        };
-
-        let candidates = await database.findStudentsByExactProfile(distributionId, profile);
-        let student = candidates[0] || null;
-
-        if (candidates.length > 1) {
-          return sendPublicError(req, res, {
-            status: 409,
-            errorCode: 'VALIDATION_FAILED',
-            message: 'Identidade ambigua no cadastro de alunos da distribuicao',
-          });
-        }
-
-        if (!student) {
-          const createdStudentId = await database.createStudent(
-            profile.name,
-            profile.course,
-            profile.phase,
-            distributionId
-          );
-          student = await database.getStudent(createdStudentId);
-        }
-
-        if (!student) {
-          return sendPublicError(req, res, {
-            status: 500,
-            errorCode: 'INTERNAL_ERROR',
-            message: 'Falha ao inicializar sessao do aluno',
-          });
-        }
-
-        return createStudentSessionResponse(req, res, database, studentSessionService, student);
-      }
-
-      if (isProduction) {
-        try {
-          await database.logSecurityAuditEvent({
-            actorType: 'anonymous',
-            eventType: 'student_legacy_session_blocked',
-            path: `${req.baseUrl || ''}${req.path || ''}` || req.path,
-            method: req.method,
-            statusCode: 403,
-            ipAddress: getRequestIp(req),
-            userAgent: getRequestUserAgent(req),
-            metadata: {
-              distributionId,
-              reason: 'missing_matricula_in_production',
-            },
-          });
-        } catch {
-          // Nao interrompe resposta por falha de auditoria.
-        }
-
-        return sendPublicError(req, res, {
-          status: 403,
-          errorCode: 'FORBIDDEN',
-          message: 'Matricula obrigatoria para sessao de aluno em producao',
-        });
-      }
-
-      if (!legacyStudentSessionEnabled) {
-        try {
-          await database.logSecurityAuditEvent({
-            actorType: 'anonymous',
-            eventType: 'student_legacy_session_blocked',
-            path: `${req.baseUrl || ''}${req.path || ''}` || req.path,
-            method: req.method,
-            statusCode: 403,
-            ipAddress: getRequestIp(req),
-            userAgent: getRequestUserAgent(req),
-            metadata: {
-              distributionId,
-              reason: 'legacy_session_disabled',
-            },
-          });
-        } catch {
-          // Nao interrompe resposta por falha de auditoria.
-        }
-
-        return sendPublicError(req, res, {
-          status: 403,
-          errorCode: 'FORBIDDEN',
-          message: 'Sessao legado desabilitada. Informe matricula.',
-        });
-      }
-
-      if (!name || !course || !Number.isInteger(phase)) {
+      if (!matricula) {
         return sendPublicError(req, res, {
           status: 400,
           errorCode: 'VALIDATION_FAILED',
-          message: 'Dados invalidos para sessao legado do aluno',
+          message: 'Matricula obrigatoria para sessao de aluno',
         });
       }
 
-      const student = await database.findStudentForSession(distributionId, { name, course, phase });
+      const registryEntry = await database.findStudentRegistryByMatriculaHash(
+        distributionId,
+        hashMatricula(matricula, registryPepper)
+      );
 
-      if (!student) {
+      if (!registryEntry) {
+        try {
+          await database.logSecurityAuditEvent({
+            actorType: 'anonymous',
+            eventType: 'student_registry_lookup_failed',
+            path: `${req.baseUrl || ''}${req.path || ''}` || req.path,
+            method: req.method,
+            statusCode: 401,
+            ipAddress: getRequestIp(req),
+            userAgent: getRequestUserAgent(req),
+            metadata: {
+              distributionId,
+            },
+          });
+        } catch {
+          // Nao interrompe resposta por falha de auditoria.
+        }
+
         return sendPublicError(req, res, {
           status: 401,
           errorCode: 'AUTH_INVALID',
           message: 'Nao foi possivel validar a identidade do aluno',
+        });
+      }
+
+      const course = mapOrigemAlunoToCourse(String(registryEntry.origem_aluno || ''));
+      if (!course) {
+        return sendPublicError(req, res, {
+          status: 500,
+          errorCode: 'INTERNAL_ERROR',
+          message: 'Origem do aluno invalida no registro oficial',
+        });
+      }
+
+      const profile = {
+        name: String(registryEntry.academico || ''),
+        course,
+        phase: Number(registryEntry.fase_turma),
+      };
+
+      const expectedStudentId = buildOperationalStudentId(
+        distributionId,
+        String(registryEntry.matricula_hash || '')
+      );
+
+      let student = await database.getStudent(expectedStudentId);
+
+      if (!student) {
+        const createdStudentId = await database.createStudent(
+          profile.name,
+          profile.course,
+          profile.phase,
+          distributionId,
+          expectedStudentId
+        );
+        student = await database.getStudent(createdStudentId);
+      }
+
+      if (!student) {
+        return sendPublicError(req, res, {
+          status: 500,
+          errorCode: 'INTERNAL_ERROR',
+          message: 'Falha ao inicializar sessao do aluno',
         });
       }
 
@@ -615,13 +499,9 @@ export function createStudentRoutes(
         await database.addStudentAffinity(
           studentAuth.studentId,
           aff.targetStudentId,
-          toNormalizedAffinity(aff.value)
+          toStoredAffinityLevel(aff.value)
         );
         affinitiesCount++;
-      }
-
-      if (affinitiesCount > 0 && (access.status === 'COMPLETED' || access.status === 'PARTIAL')) {
-        await database.updateDistributionStatus(studentAuth.distributionId, 'PHASE2');
       }
 
       return res.status(200).json({

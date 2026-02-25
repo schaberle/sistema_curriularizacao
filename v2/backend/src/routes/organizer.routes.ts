@@ -12,21 +12,22 @@ const simulationVisualState_helpers_1 = require("./simulationVisualState.helpers
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const validation_middleware_1 = require("../middleware/validation.middleware");
 const error_middleware_1 = require("../middleware/error.middleware");
+const officialRegistry_utils_1 = require("../services/registry/officialRegistry.utils");
 /**
  * Organizer Routes - Rotas de Organizador
  *
- * Requer autenticação via JWT
+ * Requer autenticaÃ§Ã£o via JWT
  *
- * POST /api/organizer/distributions - Cria nova distribuição
+ * POST /api/organizer/distributions - Cria nova distribuiÃ§Ã£o
  * POST /api/organizer/distributions/:distributionId/themes - Upload de temas
- * POST /api/organizer/distributions/:distributionId/execute - Executa distribuição (legado, chama Fase 1)
- * POST /api/organizer/distributions/:distributionId/execute-phase1 - Executa Fase 1 (formação inicial)
- * POST /api/organizer/distributions/:distributionId/execute-phase2 - Executa Fase 2 (otimização social)
+ * POST /api/organizer/distributions/:distributionId/execute - Executa distribuiÃ§Ã£o (legado, chama Fase 1)
+ * POST /api/organizer/distributions/:distributionId/execute-phase1 - Executa Fase 1 (formaÃ§Ã£o inicial)
+ * POST /api/organizer/distributions/:distributionId/execute-phase2 - Executa Fase 2 (otimizaÃ§Ã£o social)
  * PUT /api/organizer/distributions/:distributionId/social-config - Configura Fase 2
  * GET /api/organizer/distributions/:distributionId/results - Resultados
- * GET /api/organizer/distributions/:distributionId/social-metrics - Métricas sociais (Fase 2)
+ * GET /api/organizer/distributions/:distributionId/social-metrics - MÃ©tricas sociais (Fase 2)
  */
-export function createOrganizerRoutes(database, authService) {
+export function createOrganizerRoutes(database, authService, officialRegistryService) {
     const router = (0, express_1.Router)();
     const authMiddleware = (0, auth_middleware_1.createAuthMiddleware)(authService);
     const PHASE1_COMPLETED_STATUSES = new Set([
@@ -77,7 +78,57 @@ export function createOrganizerRoutes(database, authService) {
         }
         return Math.max(-1, Math.min(1, rawNumber / 100));
     };
+    const ensureOperationalStudentsFromOfficialRegistry = async (distributionId) => {
+        const registryEntries = await database.getActiveStudentRegistryEntries(distributionId);
+        if (!registryEntries.length) {
+            return [];
+        }
+        for (const entry of registryEntries) {
+            const course = (0, officialRegistry_utils_1.mapOrigemAlunoToCourse)(String(entry.origemAluno || ''));
+            const phase = Number(entry.faseTurma);
+            if (!course || !Number.isInteger(phase) || phase < 1 || phase > 10) {
+                throw new Error('Registro oficial invalido para materializacao de alunos');
+            }
+            const studentId = (0, officialRegistry_utils_1.buildOperationalStudentId)(distributionId, String(entry.matriculaHash || ''));
+            await database.createStudent(
+                String(entry.academico || ''),
+                course,
+                phase,
+                distributionId,
+                studentId
+            );
+        }
+        return registryEntries;
+    };
     const buildStudentsWithPreferences = async (distributionId) => {
+        const registryEntries = await ensureOperationalStudentsFromOfficialRegistry(distributionId);
+        if (registryEntries.length > 0) {
+            const studentsData = [];
+            const studentsMap = new Map();
+            for (const entry of registryEntries) {
+                const course = (0, officialRegistry_utils_1.mapOrigemAlunoToCourse)(String(entry.origemAluno || ''));
+                const phase = Number(entry.faseTurma);
+                if (!course || !Number.isInteger(phase) || phase < 1 || phase > 10) {
+                    continue;
+                }
+                const studentId = (0, officialRegistry_utils_1.buildOperationalStudentId)(distributionId, String(entry.matriculaHash || ''));
+                const preferencesData = await database.getStudentPreferences(studentId);
+                const preferences = preferencesData.map((item) => ({
+                    themeId: item.theme_id,
+                    rank: item.rank,
+                }));
+                const studentData = {
+                    id: studentId,
+                    name: String(entry.academico || ''),
+                    course,
+                    phase,
+                };
+                studentsData.push(studentData);
+                const student = new domain_1.Student(studentData.id, studentData.name, studentData.course, studentData.phase, preferences);
+                studentsMap.set(student.id, student);
+            }
+            return { studentsData, studentsMap, students: Array.from(studentsMap.values()) };
+        }
         const studentsData = await database.getStudentsByDistribution(distributionId);
         const studentsMap = new Map();
         for (const studentData of studentsData) {
@@ -248,7 +299,7 @@ export function createOrganizerRoutes(database, authService) {
     });
     /**
      * GET /api/organizer/distributions
-     * Lista todas as distribuições do organizador
+     * Lista todas as distribuiÃ§Ãµes do organizador
      */
     router.get('/distributions', authMiddleware, (0, error_middleware_1.asyncHandler)(async (req, res) => {
         try {
@@ -261,13 +312,13 @@ export function createOrganizerRoutes(database, authService) {
         }
         catch (error) {
             res.status(500).json({
-                error: 'Erro ao listar distribuições',
+                error: 'Erro ao listar distribuiÃ§Ãµes',
             });
         }
     }));
     /**
      * POST /api/organizer/distributions
-     * Cria nova distribuição
+     * Cria nova distribuiÃ§Ã£o
      *
      * Headers:
      * Authorization: Bearer <token>
@@ -280,14 +331,17 @@ export function createOrganizerRoutes(database, authService) {
      *   }
      * }
      *
-     * Response 401: Não autenticado
+     * Response 401: NÃ£o autenticado
      * Response 500: Erro interno
      */
     router.post('/distributions', authMiddleware, (0, error_middleware_1.asyncHandler)(async (req, res) => {
         try {
             const organizerId = (0, auth_middleware_1.getOrganizerIdFromRequest)(req);
-            // Criar distribuição
+            // Criar distribuiÃ§Ã£o
             const distributionId = await database.createDistribution(organizerId);
+            if (officialRegistryService?.syncDistribution) {
+                await officialRegistryService.syncDistribution(distributionId);
+            }
             res.status(201).json({
                 success: true,
                 data: {
@@ -297,7 +351,7 @@ export function createOrganizerRoutes(database, authService) {
         }
         catch (error) {
             res.status(500).json({
-                error: 'Erro ao criar distribuição',
+                error: 'Erro ao criar distribuiÃ§Ã£o',
             });
         }
     }));
@@ -311,8 +365,8 @@ export function createOrganizerRoutes(database, authService) {
      * Body:
      * {
      *   "themes": [
-     *     { "name": "Tema A", "description": "Descrição A", "maxGroups": 2 },
-     *     { "name": "Tema B", "description": "Descrição B", "maxGroups": 3 }
+     *     { "name": "Tema A", "description": "DescriÃ§Ã£o A", "maxGroups": 2 },
+     *     { "name": "Tema B", "description": "DescriÃ§Ã£o B", "maxGroups": 3 }
      *   ]
      * }
      *
@@ -325,9 +379,9 @@ export function createOrganizerRoutes(database, authService) {
      *   }
      * }
      *
-     * Response 400: Validação falhou
-     * Response 401: Não autenticado ou distribuição não pertence a organizador
-     * Response 404: Distribuição não encontrada
+     * Response 400: ValidaÃ§Ã£o falhou
+     * Response 401: NÃ£o autenticado ou distribuiÃ§Ã£o nÃ£o pertence a organizador
+     * Response 404: DistribuiÃ§Ã£o nÃ£o encontrada
      * Response 500: Erro interno
      */
     router.post('/distributions/:distributionId/themes', authMiddleware, validation_middleware_1.validateThemeUpload, (0, error_middleware_1.asyncHandler)(async (req, res) => {
@@ -335,22 +389,22 @@ export function createOrganizerRoutes(database, authService) {
             const organizerId = (0, auth_middleware_1.getOrganizerIdFromRequest)(req);
             const distributionId = req.params.distributionId;
             const { themes } = req.body;
-            // Verificar se distribuição existe e pertence ao organizador
+            // Verificar se distribuiÃ§Ã£o existe e pertence ao organizador
             const distribution = await database.getDistribution(distributionId);
             if (!distribution) {
                 return res.status(404).json({
-                    error: 'Distribuição não encontrada',
+                    error: 'DistribuiÃ§Ã£o nÃ£o encontrada',
                 });
             }
             if (distribution.organizer_id !== organizerId) {
                 return res.status(403).json({
-                    error: 'Você não tem permissão para acessar esta distribuição',
+                    error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o',
                 });
             }
             // Verificar limite de temas
             if (themes.length > 50) {
                 return res.status(400).json({
-                    error: 'Máximo de 50 temas permitidos',
+                    error: 'MÃ¡ximo de 50 temas permitidos',
                 });
             }
             // Criar temas
@@ -421,7 +475,7 @@ export function createOrganizerRoutes(database, authService) {
     }));
     /**
      * POST /api/organizer/distributions/:distributionId/execute
-     * Executa distribuição (algoritmo)
+     * Executa distribuiÃ§Ã£o (algoritmo)
      *
      * Headers:
      * Authorization: Bearer <token>
@@ -435,73 +489,63 @@ export function createOrganizerRoutes(database, authService) {
      *     "score": 7850,
      *     "feasible": true,
      *     "executionTime": 1234,
-     *     "report": "..." (relatório detalhado)
+     *     "report": "..." (relatÃ³rio detalhado)
      *   }
      * }
      *
-     * Response 400: Cenário infeasível
-     * Response 401: Não autenticado
-     * Response 404: Distribuição não encontrada
+     * Response 400: CenÃ¡rio infeasÃ­vel
+     * Response 401: NÃ£o autenticado
+     * Response 404: DistribuiÃ§Ã£o nÃ£o encontrada
      * Response 500: Erro interno
      */
     router.post('/distributions/:distributionId/execute', authMiddleware, (0, error_middleware_1.asyncHandler)(async (req, res) => {
         try {
             const organizerId = (0, auth_middleware_1.getOrganizerIdFromRequest)(req);
             const distributionId = req.params.distributionId;
-            // Verificar permissão
+            // Verificar permissÃ£o
             const distribution = await database.getDistribution(distributionId);
             if (!distribution) {
                 return res.status(404).json({
-                    error: 'Distribuição não encontrada',
+                    error: 'DistribuiÃ§Ã£o nÃ£o encontrada',
                 });
             }
             if (distribution.organizer_id !== organizerId) {
                 return res.status(403).json({
-                    error: 'Você não tem permissão para acessar esta distribuição',
+                    error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o',
                 });
             }
             const previousStatus = normalizeDistributionStatus(distribution.status);
             // Atualizar status
             await database.updateDistributionStatus(distributionId, 'EXECUTING');
-            // 1. Buscar alunos e temas
-            const studentsData = await database.getStudentsByDistribution(distributionId);
+            // 1. Buscar alunos (lista oficial materializada) e temas
+            const studentsBuild = await buildStudentsWithPreferences(distributionId);
             const themesData = await database.getThemesByDistribution(distributionId);
-            if (studentsData.length === 0) {
+            if (studentsBuild.students.length === 0) {
                 return res.status(400).json({
-                    error: 'Nenhum aluno registrado na distribuição',
+                    error: 'Nenhum aluno registrado na distribuiÃ§Ã£o',
                 });
             }
             if (themesData.length === 0) {
                 return res.status(400).json({
-                    error: 'Nenhum tema registrado na distribuição',
+                    error: 'Nenhum tema registrado na distribuiÃ§Ã£o',
                 });
             }
-            // 2. Converter para objetos do domain
-            const students = [];
-            for (const studentData of studentsData) {
-                // Buscar preferências primeiro
-                const preferencesData = await database.getStudentPreferences(studentData.id);
-                const preferences = preferencesData.map(p => ({
-                    themeId: p.theme_id,
-                    rank: p.rank,
-                }));
-                // Buscar afinidades
-                const affinitiesData = await database.getStudentAffinities(studentData.id);
-                const student = new domain_1.Student(studentData.id, studentData.name, studentData.course, studentData.phase, preferences);
-                // Configurar afinidades
+            // 2. Aplicar afinidades sobre os alunos oficiais
+            const students = studentsBuild.students;
+            for (const student of students) {
+                const affinitiesData = await database.getStudentAffinities(student.id);
                 for (const aff of affinitiesData) {
                     student.setAffinity(aff.target_student_id, aff.level);
                 }
-                students.push(student);
             }
             const themes = themesData.map((t) => new domain_1.Theme(t.id, distributionId, t.name, t.max_groups, t.description));
-            // 3. Executar distribuição
+            // 3. Executar distribuiÃ§Ã£o
             const engine = new DistributionEngine_1.DistributionEngine();
             const validation = engine.validateScenario(students, themes);
             if (!validation.isFeasible) {
                 await database.updateDistributionStatus(distributionId, 'FAILED');
                 return res.status(400).json({
-                    error: 'Cenário infeasível',
+                    error: 'CenÃ¡rio infeasÃ­vel',
                     issues: validation.issues,
                 });
             }
@@ -525,13 +569,13 @@ export function createOrganizerRoutes(database, authService) {
         }
         catch (error) {
             res.status(500).json({
-                error: 'Erro ao executar distribuição',
+                error: 'Erro ao executar distribuiÃ§Ã£o',
             });
         }
     }));
     /**
      * GET /api/organizer/distributions/:distributionId/results
-     * Busca resultados da distribuição
+     * Busca resultados da distribuiÃ§Ã£o
      *
      * Headers:
      * Authorization: Bearer <token>
@@ -545,7 +589,7 @@ export function createOrganizerRoutes(database, authService) {
      *         "id": "grp_123",
      *         "theme": { "id": "tema_a", "name": "Tema A" },
      *         "students": [
-     *           { "id": "stu_1", "name": "João", "course": "EE", "phase": 3 },
+     *           { "id": "stu_1", "name": "JoÃ£o", "course": "EE", "phase": 3 },
      *           ...
      *         ]
      *       },
@@ -554,27 +598,27 @@ export function createOrganizerRoutes(database, authService) {
      *   }
      * }
      *
-     * Response 401: Não autenticado
-     * Response 404: Distribuição não encontrada
+     * Response 401: NÃ£o autenticado
+     * Response 404: DistribuiÃ§Ã£o nÃ£o encontrada
      * Response 500: Erro interno
      */
     router.get('/distributions/:distributionId/results', authMiddleware, (0, error_middleware_1.asyncHandler)(async (req, res) => {
         try {
             const organizerId = (0, auth_middleware_1.getOrganizerIdFromRequest)(req);
             const distributionId = req.params.distributionId;
-            // Verificar permissão
+            // Verificar permissÃ£o
             const distribution = await database.getDistribution(distributionId);
             if (!distribution) {
                 return res.status(404).json({
-                    error: 'Distribuição não encontrada',
+                    error: 'DistribuiÃ§Ã£o nÃ£o encontrada',
                 });
             }
             if (distribution.organizer_id !== organizerId) {
                 return res.status(403).json({
-                    error: 'Você não tem permissão para acessar esta distribuição',
+                    error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o',
                 });
             }
-            // Buscar solução
+            // Buscar soluÃ§Ã£o
             const solutionData = await database.getSolution(distributionId);
             const groups = solutionData.map((group) => ({
                 id: group.id,
@@ -596,7 +640,7 @@ export function createOrganizerRoutes(database, authService) {
     }));
     /**
      * POST /api/organizer/distributions/:distributionId/execute-phase1
-     * Executa Fase 1 (Formação inicial de grupos com otimização de energia)
+     * Executa Fase 1 (FormaÃ§Ã£o inicial de grupos com otimizaÃ§Ã£o de energia)
      *
      * Headers:
      * Authorization: Bearer <token>
@@ -618,13 +662,13 @@ export function createOrganizerRoutes(database, authService) {
      *     "energy": 1234.5678,
      *     "feasible": true,
      *     "executionTime": 1234,
-     *     "report": "..." (relatório detalhado)
+     *     "report": "..." (relatÃ³rio detalhado)
      *   }
      * }
      *
-     * Response 400: Cenário infeasível
-     * Response 401: Não autenticado
-     * Response 404: Distribuição não encontrada
+     * Response 400: CenÃ¡rio infeasÃ­vel
+     * Response 401: NÃ£o autenticado
+     * Response 404: DistribuiÃ§Ã£o nÃ£o encontrada
      * Response 500: Erro interno
      */
     router.post('/distributions/:distributionId/execute-phase1', authMiddleware, (0, error_middleware_1.asyncHandler)(async (req, res) => {
@@ -632,45 +676,35 @@ export function createOrganizerRoutes(database, authService) {
         const distributionId = req.params.distributionId;
         const { wPref, wDup, wDiv } = req.body || {};
         try {
-            // Verificar permissão
+            // Verificar permissÃ£o
             const distribution = await database.getDistribution(distributionId);
             if (!distribution) {
                 return res.status(404).json({
-                    error: 'Distribuição não encontrada',
+                    error: 'DistribuiÃ§Ã£o nÃ£o encontrada',
                 });
             }
             if (distribution.organizer_id !== organizerId) {
                 return res.status(403).json({
-                    error: 'Você não tem permissão para acessar esta distribuição',
+                    error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o',
                 });
             }
             const previousStatus = normalizeDistributionStatus(distribution.status);
             // Atualizar status
             await database.updateDistributionStatus(distributionId, 'EXECUTING');
-            // 1. Buscar alunos e temas
-            const studentsData = await database.getStudentsByDistribution(distributionId);
+            // 1. Buscar alunos (lista oficial materializada) e temas
+            const studentsBuild = await buildStudentsWithPreferences(distributionId);
             const themesData = await database.getThemesByDistribution(distributionId);
-            if (studentsData.length === 0) {
+            if (studentsBuild.students.length === 0) {
                 return res.status(400).json({
-                    error: 'Nenhum aluno registrado na distribuição',
+                    error: 'Nenhum aluno registrado na distribuiÃ§Ã£o',
                 });
             }
             if (themesData.length === 0) {
                 return res.status(400).json({
-                    error: 'Nenhum tema registrado na distribuição',
+                    error: 'Nenhum tema registrado na distribuiÃ§Ã£o',
                 });
             }
-            // 2. Converter para objetos do domain
-            const students = [];
-            for (const studentData of studentsData) {
-                const preferencesData = await database.getStudentPreferences(studentData.id);
-                const preferences = preferencesData.map(p => ({
-                    themeId: p.theme_id,
-                    rank: p.rank,
-                }));
-                const student = new domain_1.Student(studentData.id, studentData.name, studentData.course, studentData.phase, preferences);
-                students.push(student);
-            }
+            const students = studentsBuild.students;
             console.log('Themes Data:', JSON.stringify(themesData, null, 2));
             const themes = themesData.map((t) => new domain_1.Theme(t.id, distributionId, t.name, t.max_groups, t.description));
             // 3. Executar Fase 1
@@ -681,7 +715,7 @@ export function createOrganizerRoutes(database, authService) {
             if (!validation.isFeasible) {
                 await database.updateDistributionStatus(distributionId, 'FAILED');
                 return res.status(400).json({
-                    error: 'Cenário infeasível',
+                    error: 'CenÃ¡rio infeasÃ­vel',
                     issues: validation.issues,
                 });
             }
@@ -691,14 +725,14 @@ export function createOrganizerRoutes(database, authService) {
             const result = await engine.solvePhase1(students, themes);
             // 4. Salvar resultado
             await database.saveSolution(distributionId, result.solution);
-            // 5. Atualizar distribuição com status COMPLETED (Fase 1)
+            // 5. Atualizar distribuiÃ§Ã£o com status COMPLETED (Fase 1)
             await database.updateDistributionStatus(distributionId, 'COMPLETED');
             const pendingState = await database.updateDistributionExecutionPendingFlags(distributionId, {
                 phase1NeedsRerun: false,
                 phase2NeedsRerun: hasCompletedPhase2(previousStatus) ? true : undefined,
             });
             // Nota: Salvar pesos configurados seria feito aqui,
-            // mas requer método helper no DatabaseService que será adicionado depois
+            // mas requer mÃ©todo helper no DatabaseService que serÃ¡ adicionado depois
             res.status(200).json({
                 success: true,
                 data: {
@@ -724,7 +758,7 @@ export function createOrganizerRoutes(database, authService) {
     }));
     /**
      * POST /api/organizer/distributions/:distributionId/execute-phase2
-     * Executa Fase 2 (Otimização social com base em afinidades)
+     * Executa Fase 2 (OtimizaÃ§Ã£o social com base em afinidades)
      *
      * Headers:
      * Authorization: Bearer <token>
@@ -745,13 +779,13 @@ export function createOrganizerRoutes(database, authService) {
      *     "groupsModified": 2,
      *     "avgCohesion": 2.3456,
      *     "executionTime": 1234,
-     *     "report": "..." (relatório detalhado)
+     *     "report": "..." (relatÃ³rio detalhado)
      *   }
      * }
      *
-     * Response 400: Fase 1 não foi executada ou sem afinidades
-     * Response 401: Não autenticado
-     * Response 404: Distribuição não encontrada
+     * Response 400: Fase 1 nÃ£o foi executada ou sem afinidades
+     * Response 401: NÃ£o autenticado
+     * Response 404: DistribuiÃ§Ã£o nÃ£o encontrada
      * Response 500: Erro interno
      */
     router.post('/distributions/:distributionId/execute-phase2', authMiddleware, (0, error_middleware_1.asyncHandler)(async (req, res) => {
@@ -759,38 +793,38 @@ export function createOrganizerRoutes(database, authService) {
             const organizerId = (0, auth_middleware_1.getOrganizerIdFromRequest)(req);
             const distributionId = req.params.distributionId;
             const { wSoc, maxIterations, temperature } = req.body || {};
-            // Verificar permissão
+            // Verificar permissÃ£o
             const distribution = await database.getDistribution(distributionId);
             if (!distribution) {
                 return res.status(404).json({
-                    error: 'Distribuição não encontrada',
+                    error: 'DistribuiÃ§Ã£o nÃ£o encontrada',
                 });
             }
             if (distribution.organizer_id !== organizerId) {
                 return res.status(403).json({
-                    error: 'Você não tem permissão para acessar esta distribuição',
+                    error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o',
                 });
             }
             // Verificar se Fase 1 foi executada
             const status = distribution.status;
-            // Permitir execução se COMPLETED, FAILED ou EXECUTING (assumindo retry/force)
-            // O importante é ter grupos da Fase 1 para otimizar
+            // Permitir execuÃ§Ã£o se COMPLETED, FAILED ou EXECUTING (assumindo retry/force)
+            // O importante Ã© ter grupos da Fase 1 para otimizar
             if (status === 'PENDING') {
                 return res.status(400).json({
-                    error: 'Fase 1 não foi executada',
+                    error: 'Fase 1 nÃ£o foi executada',
                     message: 'Execute Fase 1 antes de Fase 2',
                     currentStatus: status,
                 });
             }
             // Atualizar status
             await database.updateDistributionStatus(distributionId, 'PHASE2_EXECUTING');
-            // 1. Buscar dados fundamentais (Alunos e Temas) para reconstruir objetos de domínio
+            // 1. Buscar dados fundamentais (Alunos e Temas) para reconstruir objetos de domÃ­nio
             const studentsData = await database.getStudentsByDistribution(distributionId);
             const themesData = await database.getThemesByDistribution(distributionId);
             if (studentsData.length === 0 || themesData.length === 0) {
-                return res.status(400).json({ error: 'Dados bases (alunos/temas) não encontrados' });
+                return res.status(400).json({ error: 'Dados bases (alunos/temas) nÃ£o encontrados' });
             }
-            // Converter alunos (com preferências)
+            // Converter alunos (com preferÃªncias)
             const studentsMap = new Map();
             for (const studentData of studentsData) {
                 const preferencesData = await database.getStudentPreferences(studentData.id);
@@ -803,12 +837,12 @@ export function createOrganizerRoutes(database, authService) {
             }
             // Converter temas
             const themes = themesData.map((t) => new domain_1.Theme(t.id, distributionId, t.name, t.max_groups, t.description));
-            // 2. Buscar solução da Fase 1 do banco e reconstruir objeto Solution
+            // 2. Buscar soluÃ§Ã£o da Fase 1 do banco e reconstruir objeto Solution
             const solutionGroupsData = await database.getSolution(distributionId);
             if (!solutionGroupsData || solutionGroupsData.length === 0) {
                 await database.updateDistributionStatus(distributionId, 'FAILED').catch(() => { });
                 return res.status(400).json({
-                    error: 'Nenhuma solução da Fase 1 encontrada',
+                    error: 'Nenhuma soluÃ§Ã£o da Fase 1 encontrada',
                 });
             }
             // Reconstruir Grupos
@@ -825,8 +859,8 @@ export function createOrganizerRoutes(database, authService) {
                 }
                 groups.push(group);
             }
-            // Reconstruir Solução base (Fase 1)
-            // Recalcular energia inicial para garantir consistência
+            // Reconstruir SoluÃ§Ã£o base (Fase 1)
+            // Recalcular energia inicial para garantir consistÃªncia
             const baseSolution = new domain_1.Solution(groups);
             // 3. Construir Affinity Matrix com dados reais
             const affinityMatrix = new AffinityMatrix_1.AffinityMatrix();
@@ -841,14 +875,14 @@ export function createOrganizerRoutes(database, authService) {
             console.log(`[execute-phase2] Carregadas ${affinitiesData.length} afinidades para ${studentsMap.size} alunos.`);
             // 4. Executar Fase 2 (Social Optimization)
             const engine = new DistributionEngine_1.DistributionEngine(
-            // Pesos padrões internos se não passar config, mas o ideal seria persistir wPref da Fase 1
+            // Pesos padrÃµes internos se nÃ£o passar config, mas o ideal seria persistir wPref da Fase 1
             // Por simplicidade, assume defaults ou o que for passado no body para wSoc
             );
             const result = await engine.solvePhase2(baseSolution, affinityMatrix, themes, { wSoc, maxIterations, temperature });
             // 5. Salvar resultado (Atualiza grupos existentes ou recria?)
-            // saveSolution limpa e recria. Isso perde IDs de grupos originais se não tratarmos, 
-            // mas para o fluxo atual é aceitável ter novos IDs de grupos ou a mesma estrutura.
-            // O ideal seria update, mas saveSolution é mais seguro para consistência.
+            // saveSolution limpa e recria. Isso perde IDs de grupos originais se nÃ£o tratarmos, 
+            // mas para o fluxo atual Ã© aceitÃ¡vel ter novos IDs de grupos ou a mesma estrutura.
+            // O ideal seria update, mas saveSolution Ã© mais seguro para consistÃªncia.
             // CORRECAO: Limpar grupos anteriores antes de salvar novos para evitar duplicidade de alunos
             await database.clearDistributionGroups(distributionId);
             await database.saveSolution(distributionId, result.solution);
@@ -865,7 +899,7 @@ export function createOrganizerRoutes(database, authService) {
                     groupsCount: result.solution.getGroupCount(),
                     executionTime: result.executionTime,
                     affinitiesUsed: affinityMatrix.getSize(),
-                    avgCohesion: result.solution.socialScore / Math.max(1, result.solution.getGroupCount()), // Aproximação
+                    avgCohesion: result.solution.socialScore / Math.max(1, result.solution.getGroupCount()), // AproximaÃ§Ã£o
                     report: result.report,
                     phase1NeedsRerun: pendingState?.phase1_needs_rerun ?? false,
                     phase2NeedsRerun: pendingState?.phase2_needs_rerun ?? false,
@@ -886,20 +920,20 @@ export function createOrganizerRoutes(database, authService) {
         try {
             const distribution = await database.getDistribution(distributionId);
             if (!distribution) {
-                return res.status(404).json({ error: 'Distribuição não encontrada' });
+                return res.status(404).json({ error: 'DistribuiÃ§Ã£o nÃ£o encontrada' });
             }
             if (distribution.organizer_id !== organizerId) {
-                return res.status(403).json({ error: 'Você não tem permissão para acessar esta distribuição' });
+                return res.status(403).json({ error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o' });
             }
             const previousStatus = normalizeDistributionStatus(distribution.status);
             await database.updateDistributionStatus(distributionId, 'EXECUTING');
             const studentsBuild = await buildStudentsWithPreferences(distributionId);
             const themesData = await database.getThemesByDistribution(distributionId);
             if (studentsBuild.students.length === 0) {
-                return res.status(400).json({ error: 'Nenhum aluno registrado na distribuição' });
+                return res.status(400).json({ error: 'Nenhum aluno registrado na distribuiÃ§Ã£o' });
             }
             if (themesData.length === 0) {
-                return res.status(400).json({ error: 'Nenhum tema registrado na distribuição' });
+                return res.status(400).json({ error: 'Nenhum tema registrado na distribuiÃ§Ã£o' });
             }
             const themes = buildThemes(distributionId, themesData);
             ensureThemeCapacityFeasibility(studentsBuild.students, themes);
@@ -911,7 +945,7 @@ export function createOrganizerRoutes(database, authService) {
             const validation = engine.validateScenario(studentsBuild.students, themes);
             if (!validation.isFeasible) {
                 await database.updateDistributionStatus(distributionId, 'FAILED');
-                return res.status(400).json({ error: 'Cenário infeasível', issues: validation.issues });
+                return res.status(400).json({ error: 'CenÃ¡rio infeasÃ­vel', issues: validation.issues });
             }
             await database.clearDistributionGroups(distributionId);
             const result = await engine.solvePhase1(studentsBuild.students, themes, {
@@ -976,7 +1010,7 @@ export function createOrganizerRoutes(database, authService) {
             console.error('[simulation/execute-phase1] Error:', error);
             await database.updateDistributionStatus(distributionId, 'FAILED').catch(() => { });
             res.status(500).json({
-                error: 'Erro ao executar Fase 1 de simulação',
+                error: 'Erro ao executar Fase 1 de simulaÃ§Ã£o',
             });
         }
     }));
@@ -987,16 +1021,16 @@ export function createOrganizerRoutes(database, authService) {
         try {
             const distribution = await database.getDistribution(distributionId);
             if (!distribution) {
-                return res.status(404).json({ error: 'Distribuição não encontrada' });
+                return res.status(404).json({ error: 'DistribuiÃ§Ã£o nÃ£o encontrada' });
             }
             if (distribution.organizer_id !== organizerId) {
-                return res.status(403).json({ error: 'Você não tem permissão para acessar esta distribuição' });
+                return res.status(403).json({ error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o' });
             }
             await database.updateDistributionStatus(distributionId, 'PHASE2_EXECUTING');
             const studentsBuild = await buildStudentsWithPreferences(distributionId);
             const themesData = await database.getThemesByDistribution(distributionId);
             if (studentsBuild.students.length === 0 || themesData.length === 0) {
-                return res.status(400).json({ error: 'Dados base não encontrados para simulação' });
+                return res.status(400).json({ error: 'Dados base nÃ£o encontrados para simulaÃ§Ã£o' });
             }
             const themes = buildThemes(distributionId, themesData);
             ensureThemeCapacityFeasibility(studentsBuild.students, themes);
@@ -1004,7 +1038,7 @@ export function createOrganizerRoutes(database, authService) {
             const solutionData = await buildSolutionFromDatabase(distributionId, studentsBuild.studentsMap);
             if (!solutionData.groups.length) {
                 return res.status(400).json({
-                    error: 'Fase 1 da simulação ainda não foi executada',
+                    error: 'Fase 1 da simulaÃ§Ã£o ainda nÃ£o foi executada',
                     message: 'Execute simulation/execute-phase1 antes de simulation/execute-phase2',
                 });
             }
@@ -1098,7 +1132,7 @@ export function createOrganizerRoutes(database, authService) {
             console.error('[simulation/execute-phase2] Error:', error);
             await database.updateDistributionStatus(distributionId, 'FAILED').catch(() => { });
             res.status(500).json({
-                error: 'Erro ao executar Fase 2 de simulação',
+                error: 'Erro ao executar Fase 2 de simulaÃ§Ã£o',
             });
         }
     }));
@@ -1108,18 +1142,18 @@ export function createOrganizerRoutes(database, authService) {
         const { wPref, wDup, wDiv, lambdaVec, snapshotEvery } = req.body || {};
         const distribution = await database.getDistribution(distributionId);
         if (!distribution) {
-            return res.status(404).json({ error: 'Distribuição não encontrada' });
+            return res.status(404).json({ error: 'DistribuiÃ§Ã£o nÃ£o encontrada' });
         }
         if (distribution.organizer_id !== organizerId) {
-            return res.status(403).json({ error: 'Você não tem permissão para acessar esta distribuição' });
+            return res.status(403).json({ error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o' });
         }
         const studentsBuild = await buildStudentsWithPreferences(distributionId);
         const themesData = await database.getThemesByDistribution(distributionId);
         if (studentsBuild.students.length === 0) {
-            return res.status(400).json({ error: 'Nenhum aluno registrado na distribuição' });
+            return res.status(400).json({ error: 'Nenhum aluno registrado na distribuiÃ§Ã£o' });
         }
         if (!themesData.length) {
-            return res.status(400).json({ error: 'Nenhum tema registrado na distribuição' });
+            return res.status(400).json({ error: 'Nenhum tema registrado na distribuiÃ§Ã£o' });
         }
         const themes = buildThemes(distributionId, themesData);
         ensureThemeCapacityFeasibility(studentsBuild.students, themes);
@@ -1144,7 +1178,7 @@ export function createOrganizerRoutes(database, authService) {
                     : undefined);
                 const validation = engine.validateScenario(studentsBuild.students, themes);
                 if (!validation.isFeasible) {
-                    throw new Error(`Cenário infeasível: ${validation.issues.join(', ')}`);
+                    throw new Error(`CenÃ¡rio infeasÃ­vel: ${validation.issues.join(', ')}`);
                 }
                 await database.clearDistributionGroups(distributionId);
                 const result = await engine.solvePhase1(studentsBuild.students, themes, {
@@ -1218,22 +1252,22 @@ export function createOrganizerRoutes(database, authService) {
         const { wSoc, maxIterations, temperature, lambdaVec, snapshotEvery } = req.body || {};
         const distribution = await database.getDistribution(distributionId);
         if (!distribution) {
-            return res.status(404).json({ error: 'Distribuição não encontrada' });
+            return res.status(404).json({ error: 'DistribuiÃ§Ã£o nÃ£o encontrada' });
         }
         if (distribution.organizer_id !== organizerId) {
-            return res.status(403).json({ error: 'Você não tem permissão para acessar esta distribuição' });
+            return res.status(403).json({ error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o' });
         }
         const studentsBuild = await buildStudentsWithPreferences(distributionId);
         const themesData = await database.getThemesByDistribution(distributionId);
         if (studentsBuild.students.length === 0 || !themesData.length) {
-            return res.status(400).json({ error: 'Dados base não encontrados para simulação' });
+            return res.status(400).json({ error: 'Dados base nÃ£o encontrados para simulaÃ§Ã£o' });
         }
         const themes = buildThemes(distributionId, themesData);
         ensureThemeCapacityFeasibility(studentsBuild.students, themes);
         const solutionData = await buildSolutionFromDatabase(distributionId, studentsBuild.studentsMap);
         if (!solutionData.groups.length) {
             return res.status(400).json({
-                error: 'Fase 1 da simulação ainda não foi executada',
+                error: 'Fase 1 da simulaÃ§Ã£o ainda nÃ£o foi executada',
                 message: 'Execute simulation/execute-phase1 antes de simulation/runs/start-phase2',
             });
         }
@@ -1383,10 +1417,10 @@ export function createOrganizerRoutes(database, authService) {
             }
             const run = simulationRunManager.getRun(runId);
             if (!run) {
-                return res.status(404).json({ error: 'Execução de simulação não encontrada' });
+                return res.status(404).json({ error: 'ExecuÃ§Ã£o de simulaÃ§Ã£o nÃ£o encontrada' });
             }
             if (run.organizerId !== organizerIdFromTicket) {
-                return res.status(403).json({ error: 'Você não tem permissão para acompanhar esta execução' });
+                return res.status(403).json({ error: 'VocÃª nÃ£o tem permissÃ£o para acompanhar esta execuÃ§Ã£o' });
             }
             setRunSseHeaders(res);
             writeSseEvent(res, 'connected', {
@@ -1416,7 +1450,7 @@ export function createOrganizerRoutes(database, authService) {
             console.error('[simulation/runs/stream] Error:', error);
             if (!res.headersSent) {
                 return res.status(401).json({
-                    error: 'Não autorizado para acessar stream da simulação',
+                    error: 'NÃ£o autorizado para acessar stream da simulaÃ§Ã£o',
                 });
             }
             res.end();
@@ -1427,10 +1461,10 @@ export function createOrganizerRoutes(database, authService) {
         const runId = req.params.runId;
         const run = simulationRunManager.getRun(runId);
         if (!run) {
-            return res.status(404).json({ error: 'Execução de simulação não encontrada' });
+            return res.status(404).json({ error: 'ExecuÃ§Ã£o de simulaÃ§Ã£o nÃ£o encontrada' });
         }
         if (run.organizerId !== organizerId) {
-            return res.status(403).json({ error: 'Você não tem permissão para acessar esta execução' });
+            return res.status(403).json({ error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta execuÃ§Ã£o' });
         }
         const result = simulationRunManager.getRunResult(runId);
         res.status(200).json({
@@ -1444,10 +1478,10 @@ export function createOrganizerRoutes(database, authService) {
         try {
             const distribution = await database.getDistribution(distributionId);
             if (!distribution) {
-                return res.status(404).json({ error: 'Distribuição não encontrada' });
+                return res.status(404).json({ error: 'DistribuiÃ§Ã£o nÃ£o encontrada' });
             }
             if (distribution.organizer_id !== organizerId) {
-                return res.status(403).json({ error: 'Você não tem permissão para acessar esta distribuição' });
+                return res.status(403).json({ error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o' });
             }
             const studentsBuild = await buildStudentsWithPreferences(distributionId);
             const themesData = await database.getThemesByDistribution(distributionId);
@@ -1474,7 +1508,7 @@ export function createOrganizerRoutes(database, authService) {
         catch (error) {
             console.error('[simulation/metrics] Error:', error);
             res.status(500).json({
-                error: 'Erro ao buscar métricas de simulação',
+                error: 'Erro ao buscar mÃ©tricas de simulaÃ§Ã£o',
             });
         }
     }));
@@ -1484,10 +1518,10 @@ export function createOrganizerRoutes(database, authService) {
         try {
             const distribution = await database.getDistribution(distributionId);
             if (!distribution) {
-                return res.status(404).json({ error: 'Distribuição não encontrada' });
+                return res.status(404).json({ error: 'DistribuiÃ§Ã£o nÃ£o encontrada' });
             }
             if (distribution.organizer_id !== organizerId) {
-                return res.status(403).json({ error: 'Você não tem permissão para acessar esta distribuição' });
+                return res.status(403).json({ error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o' });
             }
             const studentsBuild = await buildStudentsWithPreferences(distributionId);
             const themesData = await database.getThemesByDistribution(distributionId);
@@ -1515,7 +1549,7 @@ export function createOrganizerRoutes(database, authService) {
         catch (error) {
             console.error('[simulation/groups] Error:', error);
             res.status(500).json({
-                error: 'Erro ao buscar grupos da simulação',
+                error: 'Erro ao buscar grupos da simulaÃ§Ã£o',
             });
         }
     }));
@@ -1525,10 +1559,10 @@ export function createOrganizerRoutes(database, authService) {
         try {
             const distribution = await database.getDistribution(distributionId);
             if (!distribution) {
-                return res.status(404).json({ error: 'Distribuição não encontrada' });
+                return res.status(404).json({ error: 'DistribuiÃ§Ã£o nÃ£o encontrada' });
             }
             if (distribution.organizer_id !== organizerId) {
-                return res.status(403).json({ error: 'Você não tem permissão para acessar esta distribuição' });
+                return res.status(403).json({ error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o' });
             }
             const studentsBuild = await buildStudentsWithPreferences(distributionId);
             const themesData = await database.getThemesByDistribution(distributionId);
@@ -1561,13 +1595,13 @@ export function createOrganizerRoutes(database, authService) {
         catch (error) {
             console.error('[simulation/visual-state] Error:', error);
             res.status(500).json({
-                error: 'Erro ao buscar estado visual da simulação',
+                error: 'Erro ao buscar estado visual da simulaÃ§Ã£o',
             });
         }
     }));
     /**
      * PUT /api/organizer/distributions/:distributionId/social-config
-     * Configura parâmetros da Fase 2 (Otimização Social)
+     * Configura parÃ¢metros da Fase 2 (OtimizaÃ§Ã£o Social)
      *
      * Headers:
      * Authorization: Bearer <token>
@@ -1583,15 +1617,15 @@ export function createOrganizerRoutes(database, authService) {
      * Response 200:
      * {
      *   "success": true,
-     *   "message": "Configuração de Fase 2 atualizada",
+     *   "message": "ConfiguraÃ§Ã£o de Fase 2 atualizada",
      *   "data": {
      *     "distributionId": "dist_123",
      *     "config": { "enabled": true, "wSoc": 1.5, ... }
      *   }
      * }
      *
-     * Response 401: Não autenticado
-     * Response 404: Distribuição não encontrada
+     * Response 401: NÃ£o autenticado
+     * Response 404: DistribuiÃ§Ã£o nÃ£o encontrada
      * Response 500: Erro interno
      */
     router.put('/distributions/:distributionId/social-config', authMiddleware, (0, error_middleware_1.asyncHandler)(async (req, res) => {
@@ -1599,16 +1633,16 @@ export function createOrganizerRoutes(database, authService) {
             const organizerId = (0, auth_middleware_1.getOrganizerIdFromRequest)(req);
             const distributionId = req.params.distributionId;
             const { enabled, wSoc, maxIterations, temperature } = req.body;
-            // Verificar permissão
+            // Verificar permissÃ£o
             const distribution = await database.getDistribution(distributionId);
             if (!distribution) {
                 return res.status(404).json({
-                    error: 'Distribuição não encontrada',
+                    error: 'DistribuiÃ§Ã£o nÃ£o encontrada',
                 });
             }
             if (distribution.organizer_id !== organizerId) {
                 return res.status(403).json({
-                    error: 'Você não tem permissão para acessar esta distribuição',
+                    error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o',
                 });
             }
             const shouldEnablePhase2 = enabled !== undefined ? Boolean(enabled) : true;
@@ -1616,10 +1650,13 @@ export function createOrganizerRoutes(database, authService) {
             if (shouldEnablePhase2 && (currentStatus === 'COMPLETED' || currentStatus === 'PARTIAL')) {
                 await database.updateDistributionStatus(distributionId, 'PHASE2');
             }
-            // Nota: Configuração de Fase 2 ainda não é persistida no banco.
+            if (!shouldEnablePhase2 && currentStatus === 'PHASE2') {
+                await database.updateDistributionStatus(distributionId, 'COMPLETED');
+            }
+            // Nota: ConfiguraÃ§Ã£o de Fase 2 ainda nÃ£o Ã© persistida no banco.
             res.status(200).json({
                 success: true,
-                message: 'Configuração de Fase 2 registrada',
+                message: 'ConfiguraÃ§Ã£o de Fase 2 registrada',
                 data: {
                     distributionId,
                     config: {
@@ -1634,13 +1671,13 @@ export function createOrganizerRoutes(database, authService) {
         catch (error) {
             console.error('[social-config] Error:', error);
             res.status(500).json({
-                error: 'Erro ao atualizar configuração de Fase 2',
+                error: 'Erro ao atualizar configuraÃ§Ã£o de Fase 2',
             });
         }
     }));
     /**
      * GET /api/organizer/distributions/:distributionId/social-metrics
-     * Recupera métricas sociais dos grupos (Fase 2)
+     * Recupera mÃ©tricas sociais dos grupos (Fase 2)
      *
      * Headers:
      * Authorization: Bearer <token>
@@ -1664,29 +1701,29 @@ export function createOrganizerRoutes(database, authService) {
      *   }
      * }
      *
-     * Response 401: Não autenticado
-     * Response 404: Distribuição não encontrada
+     * Response 401: NÃ£o autenticado
+     * Response 404: DistribuiÃ§Ã£o nÃ£o encontrada
      * Response 500: Erro interno
      */
     router.get('/distributions/:distributionId/social-metrics', authMiddleware, (0, error_middleware_1.asyncHandler)(async (req, res) => {
         try {
             const organizerId = (0, auth_middleware_1.getOrganizerIdFromRequest)(req);
             const distributionId = req.params.distributionId;
-            // Verificar permissão
+            // Verificar permissÃ£o
             const distribution = await database.getDistribution(distributionId);
             if (!distribution) {
                 return res.status(404).json({
-                    error: 'Distribuição não encontrada',
+                    error: 'DistribuiÃ§Ã£o nÃ£o encontrada',
                 });
             }
             if (distribution.organizer_id !== organizerId) {
                 return res.status(403).json({
-                    error: 'Você não tem permissão para acessar esta distribuição',
+                    error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o',
                 });
             }
             // Buscar grupos
             const groupsData = await database.getSolution(distributionId);
-            // Calcular métricas
+            // Calcular mÃ©tricas
             const groups = (groupsData || []).map((group) => {
                 const socialScore = group.social_cohesion_score || 0;
                 let status = 'Neutro';
@@ -1718,13 +1755,13 @@ export function createOrganizerRoutes(database, authService) {
         catch (error) {
             console.error('[social-metrics] Error:', error);
             res.status(500).json({
-                error: 'Erro ao buscar métricas sociais',
+                error: 'Erro ao buscar mÃ©tricas sociais',
             });
         }
     }));
     /**
      * GET /api/organizer/distributions/:distributionId/statistics
-     * Retorna estatísticas de resposta dos alunos
+     * Retorna estatÃ­sticas de resposta dos alunos
      *
      * Headers:
      * Authorization: Bearer <token>
@@ -1751,28 +1788,28 @@ export function createOrganizerRoutes(database, authService) {
      *   }
      * }
      *
-     * Response 401: Não autenticado
-     * Response 403: Não autorizado
-     * Response 404: Distribuição não encontrada
+     * Response 401: NÃ£o autenticado
+     * Response 403: NÃ£o autorizado
+     * Response 404: DistribuiÃ§Ã£o nÃ£o encontrada
      * Response 500: Erro interno
      */
     router.get('/distributions/:distributionId/statistics', authMiddleware, (0, error_middleware_1.asyncHandler)(async (req, res) => {
         try {
             const organizerId = (0, auth_middleware_1.getOrganizerIdFromRequest)(req);
             const distributionId = req.params.distributionId;
-            // Verificar permissão
+            // Verificar permissÃ£o
             const distribution = await database.getDistribution(distributionId);
             if (!distribution) {
                 return res.status(404).json({
-                    error: 'Distribuição não encontrada',
+                    error: 'DistribuiÃ§Ã£o nÃ£o encontrada',
                 });
             }
             if (distribution.organizer_id !== organizerId) {
                 return res.status(403).json({
-                    error: 'Você não tem permissão para acessar esta distribuição',
+                    error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o',
                 });
             }
-            // Buscar estatísticas
+            // Buscar estatÃ­sticas
             const stats = await database.getDistributionStatistics(distributionId);
             res.status(200).json({
                 success: true,
@@ -1785,23 +1822,23 @@ export function createOrganizerRoutes(database, authService) {
         catch (error) {
             console.error('[statistics] Error:', error);
             res.status(500).json({
-                error: 'Erro ao buscar estatísticas',
+                error: 'Erro ao buscar estatÃ­sticas',
             });
         }
     }));
     /**
      * POST /api/organizer/distributions/:distributionId/seed
-     * Popula distribuição com dados de teste para simulação
+     * Popula distribuiÃ§Ã£o com dados de teste para simulaÃ§Ã£o
      *
      * Headers:
      * Authorization: Bearer <token>
      *
      * Body (todos opcionais):
      * {
-     *   "studentCount": 133,           // Padrão: 133 (ME: 77, EE: 56)
-     *   "generatePreferences": true,   // Padrão: true
-     *   "generateAffinities": false,   // Padrão: false
-     *   "affinityDensity": 0.13        // Padrão: 0.13 (13% manifestação)
+     *   "studentCount": 133,           // PadrÃ£o: 133 (ME: 77, EE: 56)
+     *   "generatePreferences": true,   // PadrÃ£o: true
+     *   "generateAffinities": false,   // PadrÃ£o: false
+     *   "affinityDensity": 0.13        // PadrÃ£o: 0.13 (13% manifestaÃ§Ã£o)
      * }
      *
      * Response 201:
@@ -1816,73 +1853,20 @@ export function createOrganizerRoutes(database, authService) {
      *   }
      * }
      *
-     * Response 400: Validação falhou ou faltam temas
-     * Response 401: Não autenticado
-     * Response 403: Não autorizado
-     * Response 404: Distribuição não encontrada
+     * Response 400: ValidaÃ§Ã£o falhou ou faltam temas
+     * Response 401: NÃ£o autenticado
+     * Response 403: NÃ£o autorizado
+     * Response 404: DistribuiÃ§Ã£o nÃ£o encontrada
      * Response 500: Erro interno
      */
-    router.post('/distributions/:distributionId/seed', authMiddleware, validation_middleware_1.validateSeedConfig, (0, error_middleware_1.asyncHandler)(async (req, res) => {
-        try {
-            const organizerId = (0, auth_middleware_1.getOrganizerIdFromRequest)(req);
-            const distributionId = req.params.distributionId;
-            const { studentCount, generatePreferences, generateAffinities, affinityDensity, } = req.body;
-            if (seedInFlightByDistribution.has(distributionId)) {
-                return res.status(409).json({
-                    error: 'Geracao de seed ja esta em andamento para esta distribuicao',
-                });
-            }
-            seedInFlightByDistribution.add(distributionId);
-            // Verificar permissão
-            const distribution = await database.getDistribution(distributionId);
-            if (!distribution) {
-                seedInFlightByDistribution.delete(distributionId);
-                return res.status(404).json({
-                    error: 'Distribuição não encontrada',
-                });
-            }
-            if (distribution.organizer_id !== organizerId) {
-                seedInFlightByDistribution.delete(distributionId);
-                return res.status(403).json({
-                    error: 'Você não tem permissão para acessar esta distribuição',
-                });
-            }
-            // Criar SeedService e popular
-            const seedService = new SeedService_1.SeedService(database);
-            const result = await seedService.seedDistribution(distributionId, {
-                studentCount,
-                generatePreferences,
-                generateAffinities,
-                affinityDensity,
-            });
-            const currentStatus = normalizeDistributionStatus(distribution.status);
-            if (Number(result.affinitiesCreated || 0) > 0 &&
-                (currentStatus === 'COMPLETED' || currentStatus === 'PARTIAL')) {
-                await database.updateDistributionStatus(distributionId, 'PHASE2');
-            }
-            const invalidationFlags = buildPhase1InputInvalidationFlags(currentStatus);
-            await database.updateDistributionExecutionPendingFlags(distributionId, invalidationFlags);
-            res.status(201).json({
-                success: true,
-                data: {
-                    distributionId,
-                    ...result,
-                    message: 'Dados de teste criados com sucesso',
-                },
-            });
-            seedInFlightByDistribution.delete(distributionId);
-        }
-        catch (error) {
-            seedInFlightByDistribution.delete(req.params.distributionId);
-            console.error('[seed] Error:', error);
-            res.status(500).json({
-                error: 'Erro ao gerar dados de teste',
-            });
-        }
+    router.post('/distributions/:distributionId/seed', authMiddleware, validation_middleware_1.validateSeedConfig, (0, error_middleware_1.asyncHandler)(async (_req, res) => {
+        return res.status(403).json({
+            error: 'Geracao de seed de alunos desabilitada. O sistema usa somente a lista oficial da planilha.',
+        });
     }));
     /**
      * POST /api/organizer/distributions/:distributionId/seed-affinities
-     * Gera dados de afinidade simulados para alunos já existentes
+     * Gera dados de afinidade simulados para alunos jÃ¡ existentes
      *
      * Body (opcionais):
      * { "affinityDensity": 0.13 }
@@ -1892,16 +1876,16 @@ export function createOrganizerRoutes(database, authService) {
             const organizerId = (0, auth_middleware_1.getOrganizerIdFromRequest)(req);
             const distributionId = req.params.distributionId;
             const { affinityDensity } = req.body;
-            // Verificar permissão
+            // Verificar permissÃ£o
             const distribution = await database.getDistribution(distributionId);
             if (!distribution) {
                 return res.status(404).json({
-                    error: 'Distribuição não encontrada',
+                    error: 'DistribuiÃ§Ã£o nÃ£o encontrada',
                 });
             }
             if (distribution.organizer_id !== organizerId) {
                 return res.status(403).json({
-                    error: 'Você não tem permissão para acessar esta distribuição',
+                    error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o',
                 });
             }
             const seedService = new SeedService_1.SeedService(database);
@@ -1933,7 +1917,7 @@ export function createOrganizerRoutes(database, authService) {
     }));
     /**
      * GET /api/organizer/distributions/:distributionId/groups
-     * Retorna grupos formados após Fase 1 com detalhes dos membros
+     * Retorna grupos formados apÃ³s Fase 1 com detalhes dos membros
      *
      * Headers:
      * Authorization: Bearer <token>
@@ -1950,7 +1934,7 @@ export function createOrganizerRoutes(database, authService) {
      *         "theme": { "id": "thm_1", "name": "IoT" },
      *         "memberCount": 4,
      *         "members": [
-     *           { "id": "std_1", "name": "João Silva", "course": "EE", "phase": 1 },
+     *           { "id": "std_1", "name": "JoÃ£o Silva", "course": "EE", "phase": 1 },
      *           ...
      *         ]
      *       }
@@ -1958,25 +1942,25 @@ export function createOrganizerRoutes(database, authService) {
      *   }
      * }
      *
-     * Response 401: Não autenticado
-     * Response 403: Não autorizado
-     * Response 404: Distribuição não encontrada
+     * Response 401: NÃ£o autenticado
+     * Response 403: NÃ£o autorizado
+     * Response 404: DistribuiÃ§Ã£o nÃ£o encontrada
      * Response 500: Erro interno
      */
     router.get('/distributions/:distributionId/groups', authMiddleware, (0, error_middleware_1.asyncHandler)(async (req, res) => {
         try {
             const organizerId = (0, auth_middleware_1.getOrganizerIdFromRequest)(req);
             const distributionId = req.params.distributionId;
-            // Verificar permissão
+            // Verificar permissÃ£o
             const distribution = await database.getDistribution(distributionId);
             if (!distribution) {
                 return res.status(404).json({
-                    error: 'Distribuição não encontrada',
+                    error: 'DistribuiÃ§Ã£o nÃ£o encontrada',
                 });
             }
             if (distribution.organizer_id !== organizerId) {
                 return res.status(403).json({
-                    error: 'Você não tem permissão para acessar esta distribuição',
+                    error: 'VocÃª nÃ£o tem permissÃ£o para acessar esta distribuiÃ§Ã£o',
                 });
             }
             // Buscar grupos
@@ -2000,5 +1984,6 @@ export function createOrganizerRoutes(database, authService) {
     return router;
 }
 //# sourceMappingURL=organizer.routes.js.map
+
 
 

@@ -9,7 +9,6 @@ import { DataCollectionView } from '../../components/organizer/views/DataCollect
 import { useDistribution } from '../../hooks/useDistribution';
 import { usePolling } from '../../hooks/usePolling';
 import { useToast } from '../../hooks/useToast';
-import { SeedConfig } from '../../types/distribution.types';
 
 export function Step2_DataCollectionPage() {
   const { distributionId } = useParams<{ distributionId: string }>();
@@ -41,27 +40,6 @@ export function Step2_DataCollectionPage() {
     }
   );
 
-  const handleGenerateSeed = async (count: number) => {
-    try {
-      const seedConfig: SeedConfig = {
-        studentCount: count,
-        generatePreferences: true,
-        generateAffinities: false,
-        affinityDensity: 0.13,
-      };
-      await actions.generateSeed(distributionId, seedConfig);
-      addToast({
-        type: 'success',
-        message: `${count} alunos de teste gerados com sucesso`,
-      });
-    } catch (error: any) {
-      addToast({
-        type: 'error',
-        message: error?.message || 'Erro ao gerar dados de teste. Tente novamente.',
-      });
-    }
-  };
-
   const handleNext = () => {
     if ((statistics?.totalStudents ?? 0) === 0) {
       addToast({
@@ -86,9 +64,7 @@ export function Step2_DataCollectionPage() {
       distributionLink={studentFormLink}
       loading={{
         fetchStatistics: loading.fetchStatistics ?? false,
-        generateSeed: loading.generateSeed ?? false,
       }}
-      onGenerateSeed={handleGenerateSeed}
       onRefreshStatistics={() => actions.fetchStatistics(distributionId)}
       onNext={handleNext}
       onPrevious={handlePrevious}

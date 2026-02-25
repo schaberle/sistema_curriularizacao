@@ -25,6 +25,7 @@ import {
 import { AuthService } from './services/auth/AuthService';
 import { StudentSessionService } from './services/auth/StudentSessionService';
 import { DatabaseService } from './services/database/DatabaseService';
+import { OfficialStudentRegistryService } from './services/registry/OfficialStudentRegistryService';
 
 dotenv.config();
 
@@ -248,6 +249,7 @@ async function initializeApp(): Promise<Application> {
 
   const database = new DatabaseService(supabaseUrl, serviceKey);
   const authService = new AuthService(database, supabaseUrl, serviceKey);
+  const officialRegistryService = new OfficialStudentRegistryService(database);
   const studentSessionService = new StudentSessionService(database, jwtSecret, {
     jwtIssuer: process.env.JWT_ISSUER || 'curricularizacao-api',
     jwtAudience: process.env.JWT_AUDIENCE || 'student-api',
@@ -278,8 +280,8 @@ async function initializeApp(): Promise<Application> {
   app.use('/api/themes', createThemeRoutes(database, authService));
   app.use('/api/search', searchLimiter, createPublicRoutes(database));
   app.use('/api/students', studentWriteLimiter, createStudentRoutes(database, studentSessionService));
-  app.use('/api/organizer', createOrganizerRegistryRoutes(database, authService));
-  app.use('/api/organizer', createOrganizerRoutes(database, authService));
+  app.use('/api/organizer', createOrganizerRegistryRoutes(database, authService, officialRegistryService));
+  app.use('/api/organizer', createOrganizerRoutes(database, authService, officialRegistryService));
 
   app.use(notFoundHandler);
   app.use(errorHandler);
