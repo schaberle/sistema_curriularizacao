@@ -11,6 +11,7 @@ export { DistributionEngine } from './DistributionEngine';
 export { SimulationIdealMetricsService } from './SimulationIdealMetricsService';
 export { VectorState } from './VectorState';
 export { SimulationRunManager } from './SimulationRuntime';
+export { planGroupSizes, getPlannedGroupCount } from './groupSizePlanner';
 export type {
   SimulationRuntimeContext,
   SimulationSnapshotEvent,

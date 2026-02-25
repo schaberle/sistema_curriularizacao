@@ -7,6 +7,7 @@ import { SocialOptimizer } from './SocialOptimizer';
 import { AffinityMatrix } from '../../domain/AffinityMatrix';
 import { AdaptiveConstraintManager } from './AdaptiveConstraintManager';
 import { SimulationRuntimeContext } from './SimulationRuntime';
+import { getPlannedGroupCount } from './groupSizePlanner';
 
 export type Phase1ExecutionOptions = {
   temperature?: number;
@@ -334,7 +335,7 @@ export class DistributionEngine {
   }
 
   private assertThemeCapacityFeasibility(students: Student[], themes: Theme[]): void {
-    const requiredGroups = Math.ceil(students.length / 4);
+    const requiredGroups = getPlannedGroupCount(students.length);
     const totalThemeCapacity = themes.reduce((sum, theme) => sum + Math.max(0, Number(theme.maxGroups || 0)), 0);
 
     if (totalThemeCapacity < requiredGroups) {

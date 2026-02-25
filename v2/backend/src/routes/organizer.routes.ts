@@ -6,6 +6,7 @@ const DistributionEngine_1 = require("../services/optimization/DistributionEngin
 const SimulationIdealMetricsService_1 = require("../services/optimization/SimulationIdealMetricsService");
 const VectorState_1 = require("../services/optimization/VectorState");
 const SimulationRuntime_1 = require("../services/optimization/SimulationRuntime");
+const groupSizePlanner_1 = require("../services/optimization/groupSizePlanner");
 const AffinityMatrix_1 = require("../domain/AffinityMatrix");
 const SeedService_1 = require("../services/database/SeedService");
 const simulationVisualState_helpers_1 = require("./simulationVisualState.helpers");
@@ -172,7 +173,7 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
         return { groups, solution: new domain_1.Solution(groups), rawGroups: solutionGroupsData };
     };
     const ensureThemeCapacityFeasibility = (students, themes) => {
-        const requiredGroups = Math.ceil(students.length / 4);
+        const requiredGroups = (0, groupSizePlanner_1.getPlannedGroupCount)(students.length);
         const totalThemeCapacity = themes.reduce((sum, theme) => sum + Math.max(0, Number(theme.maxGroups || 0)), 0);
         if (totalThemeCapacity < requiredGroups) {
             throw new Error(`Capacidade de temas insuficiente para modo ideal: requiredGroups=${requiredGroups}, totalThemeCapacity=${totalThemeCapacity}`);
