@@ -32,21 +32,6 @@ export function Step6_AffinitiesCollectionPage() {
 
   usePolling(pollStatistics, { enabled: true, interval: 10000 });
 
-  const handleGenerateAffinities = async (density: number) => {
-    try {
-      await actions.generateAffinities(distributionId, density);
-      addToast({
-        type: 'success',
-        message: 'Afinidades de teste geradas com sucesso',
-      });
-    } catch {
-      addToast({
-        type: 'error',
-        message: 'Erro ao gerar afinidades de teste',
-      });
-    }
-  };
-
   const handleEnabledChange = async (enabled: boolean) => {
     actions.setPhase2Enabled(enabled);
 
@@ -73,11 +58,9 @@ export function Step6_AffinitiesCollectionPage() {
       phase2Enabled={phase2Config.enabled}
       loading={{
         fetchStatistics: loading.fetchStatistics || false,
-        generateAffinities: loading.generateAffinities || false,
       }}
       onEnabledChange={handleEnabledChange}
       onRefresh={() => actions.fetchStatistics(distributionId)}
-      onGenerateAffinities={handleGenerateAffinities}
       onPrevious={() => navigate(`/organizer/${distributionId}/step5-phase1-results`)}
       onNext={() => navigate(`/organizer/${distributionId}/step7-phase2-config`)}
     />
