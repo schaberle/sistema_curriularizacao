@@ -452,6 +452,7 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
             });
         }
         catch (error) {
+            console.error('[themes] Error:', error);
             res.status(500).json({
                 error: 'Erro ao criar temas',
             });

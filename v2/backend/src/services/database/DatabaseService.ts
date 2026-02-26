@@ -1063,14 +1063,60 @@ export class DatabaseService {
     groupProportion: number,
     distributionId: string
   ): Promise<string> {
-    const { data, error } = await this.client
+    const nowIso = new Date().toISOString();
+
+    const isMissingGroupProportionColumnError = (error: any): boolean => {
+      const code = String(error?.code || '').toUpperCase();
+      const message = String(error?.message || '').toLowerCase();
+
+      if (code === 'PGRST204') {
+        return message.includes('group_proportion');
+      }
+
+      // Postgres undefined_column
+      if (code === '42703') {
+        return message.includes('group_proportion');
+      }
+
+      return (
+        message.includes('group_proportion') &&
+        (
+          message.includes('does not exist') ||
+          message.includes('not exist') ||
+          message.includes('schema cache')
+        )
+      );
+    };
+
+    const insertWithGroupProportion = await this.client
       .from('themes')
       .insert({
         name,
         description,
         group_proportion: groupProportion,
         distribution_id: distributionId,
-        created_at: new Date().toISOString(),
+        created_at: nowIso,
+      })
+      .select('id')
+      .single();
+
+    if (!insertWithGroupProportion.error) {
+      return insertWithGroupProportion.data.id;
+    }
+
+    // Backward-compatible fallback for environments where migration was not applied yet.
+    if (!isMissingGroupProportionColumnError(insertWithGroupProportion.error)) {
+      throw insertWithGroupProportion.error;
+    }
+
+    const { data, error } = await this.client
+      .from('themes')
+      .insert({
+        name,
+        description,
+        max_groups: groupProportion,
+        distribution_id: distributionId,
+        created_at: nowIso,
       })
       .select('id')
       .single();
