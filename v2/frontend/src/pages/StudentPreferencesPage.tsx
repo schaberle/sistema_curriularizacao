@@ -55,14 +55,18 @@ export function StudentPreferencesPage() {
 
   useEffect(() => {
     const loadData = async () => {
-      if (!distributionId) return;
+      if (!distributionId) {
+        setError('Distribuicao invalida.');
+        setLoading(false);
+        return;
+      }
 
       try {
         setLoading(true);
         setError('');
         const activeSession = await api.getCurrentStudentSession();
         if (!activeSession || activeSession.distributionId !== distributionId) {
-          setError('Sessao de aluno ausente ou invalida. Faca novo cadastro para continuar.');
+          navigate(`/student/form/${distributionId}`, { replace: true });
           return;
         }
 
@@ -73,7 +77,12 @@ export function StudentPreferencesPage() {
         setAccess(accessData);
 
         if (!accessData.registrationOpen) {
-          setError('Janela de cadastro/preferencias encerrada para esta distribuicao.');
+          if (accessData.resultsAvailable) {
+            navigate(`/student/result/${distributionId}`, { replace: true });
+            return;
+          }
+
+          navigate(`/student/form/${distributionId}`, { replace: true });
           return;
         }
 
@@ -96,7 +105,7 @@ export function StudentPreferencesPage() {
     };
 
     loadData();
-  }, [distributionId]);
+  }, [distributionId, navigate]);
 
   const rankedThemes = useMemo(
     () => [...themes].sort((a, b) => compareThemesByRating(a, b, ratings)),

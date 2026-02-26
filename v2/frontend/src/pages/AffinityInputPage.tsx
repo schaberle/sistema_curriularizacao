@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, Heart, Plus, Search, Trash2, Users } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Heart, Plus, Search, Trash2, Users } from 'lucide-react';
 import api from '../services/api';
 import { StudentDistributionAccess } from '../types/student.types';
 
@@ -21,6 +21,8 @@ export function AffinityInputPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [savedAffinitiesCount, setSavedAffinitiesCount] = useState(0);
 
   const [access, setAccess] = useState<StudentDistributionAccess | null>(null);
   const [activeStudentId, setActiveStudentId] = useState('');
@@ -37,14 +39,18 @@ export function AffinityInputPage() {
 
   useEffect(() => {
     const loadData = async () => {
-      if (!distributionId) return;
+      if (!distributionId) {
+        setError('Distribuicao invalida.');
+        setLoading(false);
+        return;
+      }
 
       try {
         setLoading(true);
         setError('');
         const activeSession = await api.getCurrentStudentSession();
         if (!activeSession || activeSession.distributionId !== distributionId) {
-          setError('Sessao de aluno ausente ou invalida. Reentre pelo resultado ou formulario.');
+          navigate(`/student/form/${distributionId}`, { replace: true });
           return;
         }
 
@@ -59,7 +65,12 @@ export function AffinityInputPage() {
         setStudentName(studentResponse.data?.name || '');
 
         if (!accessData.affinitiesOpen) {
-          setLoading(false);
+          if (accessData.resultsAvailable) {
+            navigate(`/student/result/${distributionId}`, { replace: true });
+            return;
+          }
+
+          navigate(`/student/form/${distributionId}`, { replace: true });
           return;
         }
 
@@ -95,7 +106,7 @@ export function AffinityInputPage() {
     };
 
     loadData();
-  }, [distributionId]);
+  }, [distributionId, navigate]);
 
   const hasAnyAffinity = useMemo(() => Object.values(affinities).some((value) => value !== 0), [affinities]);
 
@@ -172,7 +183,8 @@ export function AffinityInputPage() {
         .map(([targetStudentId, value]) => ({ targetStudentId, value }));
 
       await api.submitStudentAffinities(payload);
-      navigate(`/student/result/${distributionId}`);
+      setSavedAffinitiesCount(payload.length);
+      setSubmitSuccess(true);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Erro ao salvar afinidades');
     } finally {
@@ -231,6 +243,41 @@ export function AffinityInputPage() {
               Voltar para consulta do grupo
             </button>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  if (submitSuccess) {
+    return (
+      <div className="min-h-screen bg-slate-50 py-10 px-4 sm:px-6 lg:px-8 font-sans">
+        <div className="max-w-2xl mx-auto rounded-2xl border border-emerald-200 bg-white p-8 shadow-sm">
+          <div className="mb-4 inline-flex rounded-full bg-emerald-100 p-3 text-emerald-700">
+            <CheckCircle2 className="h-7 w-7" />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900">Afinidades registradas</h1>
+          <p className="mt-3 text-slate-600">
+            {savedAffinitiesCount > 0
+              ? `${savedAffinitiesCount} afinidade(s) salva(s) com sucesso.`
+              : 'Suas afinidades foram salvas com sucesso.'}
+          </p>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => navigate(`/student/result/${distributionId}`)}
+              className="inline-flex items-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+            >
+              Consultar resultado
+            </button>
+            <button
+              type="button"
+              onClick={() => setSubmitSuccess(false)}
+              className="inline-flex items-center rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+            >
+              Revisar afinidades
+            </button>
+          </div>
         </div>
       </div>
     );

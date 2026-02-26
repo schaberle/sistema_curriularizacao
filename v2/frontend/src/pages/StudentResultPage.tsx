@@ -1,8 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AlertTriangle, BookOpen, CheckCircle, Heart, Layers, Search, User, Users } from 'lucide-react';
 import api from '../services/api';
 import { StudentDistributionAccess } from '../types/student.types';
+import { cacheMatricula, getCachedMatricula } from '../utils/studentMatriculaCache';
+
+type StudentResultData = {
+  studentName: string;
+  course: string;
+  phase: number;
+  group: any;
+  message: string;
+};
 
 /**
  * StudentResultPage - Consulta de resultado via sessao autenticada por matricula.
@@ -14,41 +23,21 @@ export function StudentResultPage() {
   const [matricula, setMatricula] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<StudentResultData | null>(null);
   const [searched, setSearched] = useState(false);
   const [access, setAccess] = useState<StudentDistributionAccess | null>(null);
   const [startingAffinitySession, setStartingAffinitySession] = useState(false);
 
-  const buildSessionPayload = () => {
-    const normalizedMatricula = matricula.trim();
+  const buildSessionPayload = (matriculaValue?: string) => {
+    const normalizedMatricula = String(matriculaValue ?? matricula).trim();
     if (!normalizedMatricula) {
       return null;
     }
     return { matricula: normalizedMatricula };
   };
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setResult(null);
-    setSearched(true);
-
-    if (!distributionId) {
-      setError('Distribuicao invalida');
-      return;
-    }
-
-    const sessionPayload = buildSessionPayload();
-    if (!sessionPayload) {
-      setError('Preencha a matricula');
-      return;
-    }
-
+  const loadResultFromActiveSession = async (): Promise<boolean> => {
     try {
-      setLoading(true);
-
-      await api.createStudentSession(distributionId, sessionPayload);
-
       const [accessResponse, meResponse] = await Promise.all([
         api.getStudentAccess(),
         api.getStudentMe(),
@@ -58,8 +47,9 @@ export function StudentResultPage() {
       setAccess(accessData);
 
       if (!accessData.resultsAvailable) {
+        setResult(null);
         setError('Resultados ainda nao foram liberados para esta distribuicao.');
-        return;
+        return false;
       }
 
       let groupData: any = null;
@@ -80,6 +70,91 @@ export function StudentResultPage() {
         group: groupData,
         message: groupMessage,
       });
+      setError('');
+      return true;
+    } catch (err: any) {
+      setResult(null);
+      setError(err?.message || 'Erro ao consultar resultado');
+      return false;
+    }
+  };
+
+  const openSessionAndLoadResult = async (matriculaValue?: string): Promise<boolean> => {
+    if (!distributionId) {
+      setError('Distribuicao invalida');
+      return false;
+    }
+
+    const sessionPayload = buildSessionPayload(matriculaValue);
+    if (!sessionPayload) {
+      setError('Preencha a matricula');
+      return false;
+    }
+
+    await api.createStudentSession(distributionId, sessionPayload);
+    cacheMatricula(distributionId, sessionPayload.matricula);
+    return loadResultFromActiveSession();
+  };
+
+  useEffect(() => {
+    if (!distributionId) {
+      return;
+    }
+
+    const cachedMatricula = getCachedMatricula(distributionId);
+    if (cachedMatricula) {
+      setMatricula(cachedMatricula);
+    }
+
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      setLoading(true);
+      try {
+        const activeSession = await api.getCurrentStudentSession();
+        if (cancelled) {
+          return;
+        }
+
+        if (activeSession && activeSession.distributionId === distributionId) {
+          setSearched(true);
+          await loadResultFromActiveSession();
+          return;
+        }
+
+        if (!cachedMatricula) {
+          return;
+        }
+
+        setSearched(true);
+        await openSessionAndLoadResult(cachedMatricula);
+      } catch (err: any) {
+        if (!cancelled) {
+          setError(err?.message || 'Erro ao consultar resultado');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [distributionId]);
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setResult(null);
+    setSearched(true);
+
+    try {
+      setLoading(true);
+      await openSessionAndLoadResult();
     } catch (err: any) {
       setError(err?.message || 'Erro ao consultar resultado');
     } finally {
@@ -92,14 +167,21 @@ export function StudentResultPage() {
       return;
     }
 
-    const sessionPayload = buildSessionPayload();
-    if (!sessionPayload) {
-      return;
-    }
-
     try {
       setStartingAffinitySession(true);
-      await api.createStudentSession(distributionId, sessionPayload);
+      const activeSession = await api.getCurrentStudentSession();
+
+      if (!activeSession || activeSession.distributionId !== distributionId) {
+        const sessionPayload = buildSessionPayload();
+        if (!sessionPayload) {
+          setError('Informe sua matricula para abrir afinidades.');
+          return;
+        }
+
+        await api.createStudentSession(distributionId, sessionPayload);
+        cacheMatricula(distributionId, sessionPayload.matricula);
+      }
+
       navigate(`/student/affinities/${distributionId}`);
     } catch (err: any) {
       setError(err?.message || 'Nao foi possivel iniciar sessao para afinidades');

@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowRight, GraduationCap } from 'lucide-react';
 import api from '../services/api';
+import { StudentDistributionAccess } from '../types/student.types';
+import { cacheMatricula, getCachedMatricula } from '../utils/studentMatriculaCache';
 
 /**
  * StudentFormPage - Pagina para aluno iniciar sessao.
@@ -14,6 +16,10 @@ export function StudentFormPage() {
   const [matricula, setMatricula] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    setMatricula(getCachedMatricula(distributionId));
+  }, [distributionId]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -33,7 +39,22 @@ export function StudentFormPage() {
     try {
       setLoading(true);
       await api.createStudentSession(distributionId, { matricula: normalizedMatricula });
-      navigate(`/student/preferences/${distributionId}`);
+      cacheMatricula(distributionId, normalizedMatricula);
+
+      const accessResponse = await api.getStudentAccess();
+      const accessData = accessResponse.data as StudentDistributionAccess;
+
+      if (accessData.registrationOpen) {
+        navigate(`/student/preferences/${distributionId}`);
+        return;
+      }
+
+      if (accessData.resultsAvailable) {
+        navigate(`/student/result/${distributionId}`);
+        return;
+      }
+
+      setError('A etapa de preferencias esta fechada no momento para esta distribuicao.');
     } catch (err: any) {
       setError(err.response?.data?.error || err.response?.data?.message || 'Erro ao iniciar sessao');
     } finally {
