@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Rounded rect background with brand gradient -->
+  <rect width="512" height="512" rx="112" fill="url(#bg-grad)"/>
+
+  <!-- Interconnected nodes symbolizing group distribution -->
+  <circle cx="256" cy="180" r="64" stroke="white" stroke-width="40" />
+  <circle cx="170" cy="320" r="64" stroke="white" stroke-width="40" />
+  <circle cx="342" cy="320" r="64" stroke="white" stroke-width="40" />
+
+  <circle cx="256" cy="180" r="28" fill="white" />
+  <circle cx="170" cy="320" r="28" fill="white" opacity="0.8" />
+  <circle cx="342" cy="320" r="28" fill="white" opacity="0.8" />
+
+  <!-- Connecting paths -->
+  <path d="M 226 216 L 194 274" stroke="white" stroke-width="24" stroke-linecap="round" opacity="0.9" />
+  <path d="M 286 216 L 318 274" stroke="white" stroke-width="24" stroke-linecap="round" opacity="0.9" />
+  <path d="M 204 320 L 308 320" stroke="white" stroke-width="24" stroke-linecap="round" opacity="0.9" />
+
+  <!-- Inner glowing center node -->
+  <circle cx="256" cy="265" r="20" fill="white" opacity="0.6" />
+
+  <defs>
+    <linearGradient id="bg-grad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3c73fa"/>
+      <stop offset="1" stop-color="#1f48b8"/>
+    </linearGradient>
+  </defs>
+</svg>
