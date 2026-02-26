@@ -668,8 +668,9 @@ class APIClient {
   // ============================================================
 
   async login(email: string, password: string) {
+    const normalizedEmail = email.trim().toLowerCase();
     const response = await this.client.post('/api/auth/login', {
-      email,
+      email: normalizedEmail,
       password,
     });
     return response.data;

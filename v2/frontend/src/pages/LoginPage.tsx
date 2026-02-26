@@ -18,13 +18,14 @@ export function LoginPage() {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setLocalError('');
+    const normalizedEmail = email.trim().toLowerCase();
 
-    if (!email || !password) {
+    if (!normalizedEmail || !password) {
       setLocalError('Email e senha sao obrigatorios');
       return;
     }
 
-    const success = await login(email, password);
+    const success = await login(normalizedEmail, password);
     if (success) {
       const params = new URLSearchParams(location.search);
       const next = params.get('next');
