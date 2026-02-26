@@ -102,8 +102,10 @@ export function validateThemeUpload(req: Request, res: Response, next: NextFunct
       if (!theme.name || theme.name.trim() === '') {
         errors.push(`Tema ${index + 1}: nome é obrigatório`);
       }
-      if (!Number.isInteger(theme.maxGroups) || theme.maxGroups < 1) {
-        errors.push(`Tema ${index + 1}: maxGroups deve ser um número >= 1`);
+      const parsedGroupProportion =
+        theme?.groupProportion ?? theme?.maxGroups ?? 1;
+      if (!Number.isInteger(parsedGroupProportion) || parsedGroupProportion < 1) {
+        errors.push(`Tema ${index + 1}: groupProportion deve ser um número inteiro >= 1`);
       }
     });
   }

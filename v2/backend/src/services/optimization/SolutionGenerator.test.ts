@@ -32,8 +32,8 @@ describe('SolutionGenerator', () => {
     );
   }
 
-  function createTheme(id: string, name: string, maxGroups: number = 10): Theme {
-    return new Theme(id, distributionId, name, maxGroups);
+  function createTheme(id: string, name: string, groupProportion: number = 10): Theme {
+    return new Theme(id, distributionId, name, groupProportion);
   }
 
   describe('Geracao de Solucao Inicial', () => {
@@ -84,7 +84,7 @@ describe('SolutionGenerator', () => {
       expect(totalStudents).toBe(students.length);
     });
 
-    it('deve respeitar limites de grupos por tema', () => {
+    it('deve respeitar distribuicao proporcional por tema', () => {
       const students = Array.from({ length: 12 }, (_, i) =>
         createStudent(
           `s${i + 1}`,
@@ -106,8 +106,36 @@ describe('SolutionGenerator', () => {
         groupsByTheme.set(group.themeId, (groupsByTheme.get(group.themeId) || 0) + 1);
       }
 
-      expect(groupsByTheme.get('T1') || 0).toBeLessThanOrEqual(1);
-      expect(groupsByTheme.get('T2') || 0).toBeLessThanOrEqual(2);
+      expect(groupsByTheme.get('T1') || 0).toBe(1);
+      expect(groupsByTheme.get('T2') || 0).toBe(2);
+    });
+
+    it('deve distribuir igualmente quando todos os pesos forem 1', () => {
+      const students = Array.from({ length: 32 }, (_, i) =>
+        createStudent(
+          `s${i + 1}`,
+          `Student ${i + 1}`,
+          i < 8 ? 'EE' : 'ME',
+          (i % 8) + 1,
+          ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8']
+        )
+      );
+
+      const themes = Array.from({ length: 8 }, (_, i) =>
+        createTheme(`T${i + 1}`, `Tema ${i + 1}`, 1)
+      );
+
+      const solution = generator.generateInitialSolution(students, themes);
+      const groupsByTheme = new Map<string, number>();
+      for (const group of solution.groups) {
+        groupsByTheme.set(group.themeId, (groupsByTheme.get(group.themeId) || 0) + 1);
+      }
+
+      expect(solution.getGroupCount()).toBe(8);
+      expect(groupsByTheme.size).toBe(8);
+      for (const theme of themes) {
+        expect(groupsByTheme.get(theme.id) || 0).toBe(1);
+      }
     });
 
     it('deve calcular energia de saida', () => {

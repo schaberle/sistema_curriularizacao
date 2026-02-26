@@ -2,6 +2,7 @@ import { Student, Group, Theme, Solution } from '../../domain';
 import { EnergyCalculator } from './EnergyCalculator';
 import { ConstraintRules } from './SystemViabilityAnalyzer';
 import { planGroupSizes } from './groupSizePlanner';
+import { ThemeQuotaPolicy } from './ThemeQuotaPolicy';
 
 /**
  * SolutionGenerator - builds an initial feasible phase-1 solution.
@@ -12,7 +13,7 @@ export class SolutionGenerator {
     minElectricalEngineers: 1,
     maxElectricalEngineers: 2,
     minPhaseDiversity: 2,
-    groupSize: 4
+    groupSize: 4,
   };
 
   constructor(config?: { wPref?: number; wDup?: number; wDiv?: number }) {
@@ -32,11 +33,12 @@ export class SolutionGenerator {
    * 1) Plan target sizes (3/4/5)
    * 2) Place EE first (1 per group when possible, then up to max)
    * 3) Fill remaining slots with ME maximizing phase diversity
-   * 4) Assign best theme per group
+   * 4) Assign themes respecting proportional quota policy
    */
   generateInitialSolution(
     students: Student[],
-    themes: Theme[]
+    themes: Theme[],
+    themeQuotaPolicy?: ThemeQuotaPolicy
   ): Solution {
     if (students.length === 0 || themes.length === 0) {
       return new Solution([], [], 0);
@@ -47,12 +49,7 @@ export class SolutionGenerator {
     const groupCount = targetSizes.length;
 
     if (groupCount === 0) {
-      const group = new Group(
-        'group_0',
-        themes[0].id,
-        'dist_temp',
-        [...students]
-      );
+      const group = new Group('group_0', themes[0].id, 'dist_temp', [...students]);
       const { theme: bestTheme, energy } = this.energyCalculator.findBestThemeForGroup(group, themes);
       group.themeId = bestTheme.id;
       const totalEnergy = Number.isFinite(energy) ? energy : 0;
@@ -169,17 +166,18 @@ export class SolutionGenerator {
       groupStudents[selectedGroup].push(student);
     }
 
-    // ===== Step 4: build Group objects and assign theme =====
+    // ===== Step 4: build Group objects and assign themes =====
     const totalGroupsNeeded = groupStudents.filter((g) => g.length > 0).length;
-    const themeLimits = this.computeProportionalLimits(themes, totalGroupsNeeded);
-    console.log(`[SolutionGenerator] Proportional theme limits:`);
-    for (const theme of themes) {
-      console.log(`  ${theme.name}: ideal=${theme.maxGroups}, proportional=${themeLimits.get(theme.id)}`);
+    const quotaPolicy = themeQuotaPolicy || new ThemeQuotaPolicy(themes, totalGroupsNeeded);
+    console.log(`[SolutionGenerator] Theme quota policy:`);
+    for (const range of quotaPolicy.getRanges()) {
+      console.log(
+        `  theme=${range.themeId}, weight=${range.weight}, target=${range.target}, range=[${range.min},${range.max}]`
+      );
     }
 
     const groups: Group[] = [];
-    let totalEnergy = 0;
-    const themeUsage = new Map<string, number>();
+    const themeUsage = quotaPolicy.initializeUsage();
 
     for (let i = 0; i < groupStudents.length; i++) {
       const studentsInGroup = groupStudents[i];
@@ -192,68 +190,60 @@ export class SolutionGenerator {
         studentsInGroup
       );
 
-      const { theme: bestTheme, energy } = this.findBestThemeWithCapacity(
-        tempGroup, themes, themeLimits, themeUsage
+      const groupsRemainingAfterAssignment = totalGroupsNeeded - (groups.length + 1);
+      const { theme: bestTheme } = this.findBestThemeWithQuota(
+        tempGroup,
+        themes,
+        quotaPolicy,
+        themeUsage,
+        groupsRemainingAfterAssignment
       );
+
       tempGroup.themeId = bestTheme.id;
       themeUsage.set(bestTheme.id, (themeUsage.get(bestTheme.id) || 0) + 1);
-
-      if (Number.isFinite(energy)) {
-        totalEnergy += energy;
-      }
-
       groups.push(tempGroup);
     }
 
-    this.balanceThemes(groups, themes, themeLimits);
+    const usageAfterGreedy = quotaPolicy.buildUsageFromGroups(groups);
+    const usageValidation = quotaPolicy.validateUsage(usageAfterGreedy, {
+      requireMin: true,
+      requireMax: true,
+      requireOrder: true,
+      requireBalance: true,
+    });
+    if (!usageValidation.ok) {
+      this.rebalanceThemesToPolicy(groups, themes, quotaPolicy);
+    }
 
-    totalEnergy = 0;
+    let totalEnergy = 0;
     let hasInfeasible = false;
     for (const group of groups) {
       const theme = themes.find((t) => t.id === group.themeId);
-      if (theme) {
-        const energy = this.energyCalculator.calculateGroupEnergy(group, theme);
-        if (Number.isFinite(energy)) {
-          totalEnergy += energy;
-        } else {
-          hasInfeasible = true;
-        }
+      if (!theme) {
+        hasInfeasible = true;
+        continue;
+      }
+      const energy = this.energyCalculator.calculateGroupEnergy(group, theme);
+      if (Number.isFinite(energy)) {
+        totalEnergy += energy;
+      } else {
+        hasInfeasible = true;
       }
     }
 
     if (hasInfeasible) {
-      console.warn(`[SolutionGenerator] ${groups.filter((g) => {
-        const t = themes.find((th) => th.id === g.themeId);
-        return t && !Number.isFinite(this.energyCalculator.calculateGroupEnergy(g, t));
-      }).length} infeasible group(s) detected (energy = infinity)`);
+      console.warn(`[SolutionGenerator] infeasible group(s) detected (energy = infinity)`);
     }
 
     return new Solution(groups, [], 0, 0, 0, totalEnergy);
   }
 
-  /**
-   * Calculates proportional limits by theme.
-   */
-  private computeProportionalLimits(themes: Theme[], totalGroupsNeeded: number): Map<string, number> {
-    const sumOfIdeals = themes.reduce((sum, t) => sum + t.maxGroups, 0);
-    const scaleFactor = totalGroupsNeeded / sumOfIdeals;
-    const limits = new Map<string, number>();
-
-    for (const theme of themes) {
-      limits.set(theme.id, Math.ceil(theme.maxGroups * scaleFactor));
-    }
-
-    return limits;
-  }
-
-  /**
-   * Finds the best theme for a group respecting proportional capacity.
-   */
-  private findBestThemeWithCapacity(
+  private findBestThemeWithQuota(
     group: Group,
     themes: Theme[],
-    limits: Map<string, number>,
-    usage: Map<string, number>
+    quotaPolicy: ThemeQuotaPolicy,
+    usage: Map<string, number>,
+    groupsRemainingAfterAssignment: number
   ): { theme: Theme; energy: number } {
     let bestTheme: Theme | null = null;
     let bestEnergy = Infinity;
@@ -262,17 +252,22 @@ export class SolutionGenerator {
 
     for (const theme of themes) {
       const energy = this.energyCalculator.calculateGroupEnergy(group, theme);
-      const currentUsage = usage.get(theme.id) || 0;
-      const limit = limits.get(theme.id) || 1;
-
-      if (currentUsage < limit && energy < bestEnergy) {
-        bestEnergy = energy;
-        bestTheme = theme;
+      if (!Number.isFinite(energy)) {
+        continue;
       }
 
       if (energy < fallbackEnergy) {
         fallbackEnergy = energy;
         fallbackTheme = theme;
+      }
+
+      if (!quotaPolicy.canAssignTheme(theme.id, usage, groupsRemainingAfterAssignment)) {
+        continue;
+      }
+
+      if (energy < bestEnergy) {
+        bestEnergy = energy;
+        bestTheme = theme;
       }
     }
 
@@ -283,43 +278,164 @@ export class SolutionGenerator {
     return { theme: fallbackTheme || themes[0], energy: fallbackEnergy };
   }
 
-  /**
-   * Rebalances themes to respect proportional limits.
-   */
-  private balanceThemes(groups: Group[], themes: Theme[], limits: Map<string, number>): void {
-    const themeCounts = new Map<string, number>();
-    for (const group of groups) {
-      themeCounts.set(group.themeId, (themeCounts.get(group.themeId) || 0) + 1);
-    }
+  private rebalanceThemesToPolicy(groups: Group[], themes: Theme[], quotaPolicy: ThemeQuotaPolicy): void {
+    const maxIterations = Math.max(1, groups.length * themes.length * 5);
 
-    for (const group of groups) {
-      const currentTheme = themes.find((t) => t.id === group.themeId);
-      if (!currentTheme) continue;
+    const tryMove = (fromThemeId: string, toThemeId: string): boolean => {
+      let bestGroup: Group | null = null;
+      let bestDelta = Infinity;
+      const toTheme = themes.find((theme) => theme.id === toThemeId);
+      if (!toTheme) {
+        return false;
+      }
 
-      const count = themeCounts.get(group.themeId) || 0;
-      const limit = limits.get(group.themeId) || 1;
+      for (const group of groups) {
+        if (group.themeId !== fromThemeId) {
+          continue;
+        }
+        const fromTheme = themes.find((theme) => theme.id === fromThemeId);
+        if (!fromTheme) {
+          continue;
+        }
 
-      if (count > limit) {
-        let bestTheme: Theme | null = null;
-        let bestEnergy = Infinity;
+        const currentEnergy = this.energyCalculator.calculateGroupEnergy(group, fromTheme);
+        const nextEnergy = this.energyCalculator.calculateGroupEnergy(group, toTheme);
+        if (!Number.isFinite(currentEnergy) || !Number.isFinite(nextEnergy)) {
+          continue;
+        }
 
-        for (const theme of themes) {
-          const themeCount = themeCounts.get(theme.id) || 0;
-          const themeLimit = limits.get(theme.id) || 1;
-          if (themeCount >= themeLimit) continue;
+        const delta = nextEnergy - currentEnergy;
+        if (delta < bestDelta) {
+          bestDelta = delta;
+          bestGroup = group;
+        }
+      }
 
-          const energy = this.energyCalculator.calculateGroupEnergy(group, theme);
-          if (energy < bestEnergy) {
-            bestEnergy = energy;
-            bestTheme = theme;
+      if (!bestGroup) {
+        return false;
+      }
+
+      bestGroup.themeId = toThemeId;
+      return true;
+    };
+
+    let iteration = 0;
+    while (iteration < maxIterations) {
+      iteration += 1;
+      const usage = quotaPolicy.buildUsageFromGroups(groups);
+      const validation = quotaPolicy.validateUsage(usage, {
+        requireMin: true,
+        requireMax: true,
+        requireOrder: true,
+        requireBalance: true,
+      });
+      if (validation.ok) {
+        return;
+      }
+
+      let changed = false;
+
+      // 1) Fix minima
+      for (const range of quotaPolicy.getRanges()) {
+        while ((usage.get(range.themeId) || 0) < range.min) {
+          let moved = false;
+          for (const donor of quotaPolicy.getRanges()) {
+            const donorUsage = usage.get(donor.themeId) || 0;
+            if (donorUsage <= donor.min) {
+              continue;
+            }
+            if ((usage.get(range.themeId) || 0) >= range.max) {
+              continue;
+            }
+            if (tryMove(donor.themeId, range.themeId)) {
+              usage.set(donor.themeId, donorUsage - 1);
+              usage.set(range.themeId, (usage.get(range.themeId) || 0) + 1);
+              moved = true;
+              changed = true;
+              break;
+            }
+          }
+          if (!moved) {
+            break;
           }
         }
+      }
 
-        if (bestTheme) {
-          themeCounts.set(group.themeId, (themeCounts.get(group.themeId) || 0) - 1);
-          group.themeId = bestTheme.id;
-          themeCounts.set(bestTheme.id, (themeCounts.get(bestTheme.id) || 0) + 1);
+      // 2) Fix maxima
+      for (const range of quotaPolicy.getRanges()) {
+        while ((usage.get(range.themeId) || 0) > range.max) {
+          let moved = false;
+          for (const receiver of quotaPolicy.getRanges()) {
+            const receiverUsage = usage.get(receiver.themeId) || 0;
+            if (receiverUsage >= receiver.max) {
+              continue;
+            }
+            if (tryMove(range.themeId, receiver.themeId)) {
+              usage.set(range.themeId, (usage.get(range.themeId) || 0) - 1);
+              usage.set(receiver.themeId, receiverUsage + 1);
+              moved = true;
+              changed = true;
+              break;
+            }
+          }
+          if (!moved) {
+            break;
+          }
         }
+      }
+
+      // 3) Fix order constraints
+      for (const rule of quotaPolicy.getOrderConstraints()) {
+        while ((usage.get(rule.higherThemeId) || 0) < (usage.get(rule.lowerThemeId) || 0) + 1) {
+          const higherRange = quotaPolicy.getRange(rule.higherThemeId);
+          const lowerRange = quotaPolicy.getRange(rule.lowerThemeId);
+          if (!higherRange || !lowerRange) {
+            break;
+          }
+          if ((usage.get(rule.higherThemeId) || 0) >= higherRange.max) {
+            break;
+          }
+          if ((usage.get(rule.lowerThemeId) || 0) <= lowerRange.min) {
+            break;
+          }
+          if (!tryMove(rule.lowerThemeId, rule.higherThemeId)) {
+            break;
+          }
+          usage.set(rule.lowerThemeId, (usage.get(rule.lowerThemeId) || 0) - 1);
+          usage.set(rule.higherThemeId, (usage.get(rule.higherThemeId) || 0) + 1);
+          changed = true;
+        }
+      }
+
+      // 4) Keep equally weighted/targeted themes balanced
+      for (const rule of quotaPolicy.getBalanceConstraints()) {
+        while (Math.abs((usage.get(rule.themeAId) || 0) - (usage.get(rule.themeBId) || 0)) > 1) {
+          const countA = usage.get(rule.themeAId) || 0;
+          const countB = usage.get(rule.themeBId) || 0;
+          const donorThemeId = countA > countB ? rule.themeAId : rule.themeBId;
+          const receiverThemeId = donorThemeId === rule.themeAId ? rule.themeBId : rule.themeAId;
+          const donorRange = quotaPolicy.getRange(donorThemeId);
+          const receiverRange = quotaPolicy.getRange(receiverThemeId);
+          if (!donorRange || !receiverRange) {
+            break;
+          }
+          if ((usage.get(donorThemeId) || 0) <= donorRange.min) {
+            break;
+          }
+          if ((usage.get(receiverThemeId) || 0) >= receiverRange.max) {
+            break;
+          }
+          if (!tryMove(donorThemeId, receiverThemeId)) {
+            break;
+          }
+          usage.set(donorThemeId, (usage.get(donorThemeId) || 0) - 1);
+          usage.set(receiverThemeId, (usage.get(receiverThemeId) || 0) + 1);
+          changed = true;
+        }
+      }
+
+      if (!changed) {
+        return;
       }
     }
   }

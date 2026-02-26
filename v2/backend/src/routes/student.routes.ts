@@ -315,7 +315,10 @@ export function createStudentRoutes(
             id: t.id,
             name: t.name,
             description: t.description,
-            maxGroups: t.max_groups,
+            groupProportion:
+              Number.isFinite(Number(t.group_proportion))
+                ? Number(t.group_proportion)
+                : (Number.isFinite(Number(t.max_groups)) ? Number(t.max_groups) : 1),
           })),
         },
       });

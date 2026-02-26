@@ -1,6 +1,7 @@
 import { AffinityMatrix } from '../../domain/AffinityMatrix';
 import { Group, Student, Theme } from '../../domain';
 import { EnergyCalculator } from './EnergyCalculator';
+import { ThemeQuotaPolicy } from './ThemeQuotaPolicy';
 
 const INFEASIBLE_ENERGY_FALLBACK = 1_000_000_000;
 
@@ -60,13 +61,16 @@ export interface SimulationMetrics {
       distinctPhases: number;
       phases: number[];
     }>;
-    themeCapacityUsage: Array<{
+    themeProportionUsage: Array<{
       themeId: string;
       themeName: string;
+      weight: number;
+      target: number;
+      min: number;
+      max: number;
       used: number;
-      capacity: number;
-      usagePercent: number;
-      exceedsCapacity: boolean;
+      deviation: number;
+      withinRange: boolean;
     }>;
   };
   groups: SimulationGroupMetrics[];
@@ -207,17 +211,19 @@ export class SimulationIdealMetricsService {
         ? totalEnergyPhase2 / finiteEnergyGroupsPhase2
         : undefined;
 
-    const themeCapacityUsage = themes.map((theme) => {
-      const used = themeUsage.get(theme.id) || 0;
-      const capacity = Math.max(1, Number(theme.maxGroups || 0));
-      const usagePercent = (used / capacity) * 100;
+    const themeQuotaPolicy = new ThemeQuotaPolicy(themes, groups.length);
+    const themeProportionUsage = themeQuotaPolicy.getComplianceAudit(themeUsage).map((item) => {
+      const theme = themeById.get(item.themeId);
       return {
-        themeId: theme.id,
-        themeName: theme.name,
-        used,
-        capacity,
-        usagePercent,
-        exceedsCapacity: used > capacity,
+        themeId: item.themeId,
+        themeName: theme?.name || 'Tema removido',
+        weight: item.weight,
+        target: item.target,
+        min: item.min,
+        max: item.max,
+        used: item.used,
+        deviation: item.deviation,
+        withinRange: item.withinRange,
       };
     });
 
@@ -247,7 +253,7 @@ export class SimulationIdealMetricsService {
       audit: {
         electricalPerGroup,
         distinctPhasesPerGroup,
-        themeCapacityUsage,
+        themeProportionUsage,
       },
       groups: groupsPayload,
     };

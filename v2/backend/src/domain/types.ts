@@ -106,7 +106,8 @@ export interface ThemeData {
   distribution_id: string;
   name: string;
   description?: string;
-  max_groups: number;
+  group_proportion?: number;
+  max_groups?: number;
   created_at: string;
   updated_at: string;
 }

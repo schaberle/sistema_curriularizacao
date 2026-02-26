@@ -17,14 +17,17 @@ export function ThemeFormSection({ onSubmit, loading = false }: ThemeFormSection
   const [formData, setFormData] = useState<Theme>({
     name: '',
     description: '',
-    maxGroups: undefined,
+    groupProportion: 1,
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(formData);
+    onSubmit({
+      ...formData,
+      groupProportion: Math.max(1, Number(formData.groupProportion || 1)),
+    });
     // Reset form
-    setFormData({ name: '', description: '', maxGroups: undefined });
+    setFormData({ name: '', description: '', groupProportion: 1 });
   };
 
   return (
@@ -51,7 +54,7 @@ export function ThemeFormSection({ onSubmit, loading = false }: ThemeFormSection
       {/* Theme Description */}
       <div>
         <label htmlFor="themeDesc" className="block text-sm font-medium text-slate-700 mb-2">
-          Descrição (opcional)
+          Descricao (opcional)
         </label>
         <textarea
           id="themeDesc"
@@ -66,20 +69,20 @@ export function ThemeFormSection({ onSubmit, loading = false }: ThemeFormSection
         />
       </div>
 
-      {/* Max Groups */}
+      {/* Group Proportion */}
       <div>
-        <label htmlFor="maxGroups" className="block text-sm font-medium text-slate-700 mb-2">
-          Máximo de Grupos (opcional)
+        <label htmlFor="groupProportion" className="block text-sm font-medium text-slate-700 mb-2">
+          Proporcao de grupos (peso)
         </label>
         <input
-          id="maxGroups"
+          id="groupProportion"
           type="number"
-          placeholder="Deixe em branco para sem limite"
-          value={formData.maxGroups || ''}
+          placeholder="Peso do tema (padrao 1)"
+          value={formData.groupProportion ?? 1}
           onChange={(e) =>
             setFormData({
               ...formData,
-              maxGroups: e.target.value ? parseInt(e.target.value) : undefined,
+              groupProportion: Math.max(1, parseInt(e.target.value, 10) || 1),
             })
           }
           disabled={loading}

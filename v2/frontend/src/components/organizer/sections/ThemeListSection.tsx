@@ -44,11 +44,9 @@ export function ThemeListSection({
               </p>
             )}
 
-            {theme.maxGroups && (
-              <p className="text-xs text-slate-500 mt-2">
-                Máximo: {theme.maxGroups} grupo{theme.maxGroups > 1 ? 's' : ''}
-              </p>
-            )}
+            <p className="text-xs text-slate-500 mt-2">
+              Peso: {Math.max(1, Number(theme.groupProportion ?? 1))}
+            </p>
           </div>
 
           {/* Actions */}

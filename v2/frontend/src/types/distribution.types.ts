@@ -30,7 +30,7 @@ export interface Theme {
   id?: string;
   name: string;
   description?: string;
-  maxGroups?: number;
+  groupProportion?: number;
   createdAt?: string;
 }
 
@@ -139,13 +139,16 @@ export interface SimulationMetrics {
       distinctPhases: number;
       phases: number[];
     }>;
-    themeCapacityUsage: Array<{
+    themeProportionUsage: Array<{
       themeId: string;
       themeName: string;
+      weight: number;
+      target: number;
+      min: number;
+      max: number;
       used: number;
-      capacity: number;
-      usagePercent: number;
-      exceedsCapacity: boolean;
+      deviation: number;
+      withinRange: boolean;
     }>;
   };
   groups: SimulationGroupMetrics[];

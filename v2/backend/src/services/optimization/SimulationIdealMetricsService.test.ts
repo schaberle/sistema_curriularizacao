@@ -95,9 +95,9 @@ describe('SimulationIdealMetricsService', () => {
     expect(metrics.audit.electricalPerGroup).toHaveLength(2);
     expect(metrics.audit.distinctPhasesPerGroup[0].distinctPhases).toBeGreaterThanOrEqual(2);
 
-    const usageT1 = metrics.audit.themeCapacityUsage.find((item) => item.themeId === 'T1');
+    const usageT1 = metrics.audit.themeProportionUsage.find((item) => item.themeId === 'T1');
     expect(usageT1?.used).toBe(1);
-    expect(usageT1?.capacity).toBe(1);
-    expect(usageT1?.exceedsCapacity).toBe(false);
+    expect(usageT1?.target).toBe(1);
+    expect(usageT1?.withinRange).toBe(true);
   });
 });

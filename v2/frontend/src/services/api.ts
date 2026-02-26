@@ -135,7 +135,7 @@ function normalizeThemes(rawThemes: any[] = []): Theme[] {
     id: theme.id,
     name: theme.name,
     description: theme.description ?? '',
-    maxGroups: theme.max_groups ?? theme.maxGroups ?? 1,
+    groupProportion: theme.group_proportion ?? theme.groupProportion ?? theme.max_groups ?? theme.maxGroups ?? 1,
     createdAt: theme.created_at ?? theme.createdAt,
   }));
 }
@@ -324,7 +324,7 @@ function normalizeSimulationMetrics(raw: any): SimulationMetrics {
     audit: {
       electricalPerGroup: raw?.audit?.electricalPerGroup ?? [],
       distinctPhasesPerGroup: raw?.audit?.distinctPhasesPerGroup ?? [],
-      themeCapacityUsage: raw?.audit?.themeCapacityUsage ?? [],
+      themeProportionUsage: raw?.audit?.themeProportionUsage ?? [],
     },
     groups: normalizeSimulationGroups(raw?.groups ?? []),
   };
@@ -838,7 +838,7 @@ class APIClient {
     return response.data;
   }
 
-  async uploadThemes(distributionId: string, themes: Array<{ name: string; description: string; maxGroups: number }>) {
+  async uploadThemes(distributionId: string, themes: Array<{ name: string; description: string; groupProportion: number }>) {
     const response = await this.client.post(
       `/api/organizer/distributions/${distributionId}/themes`,
       { themes }
@@ -1134,7 +1134,7 @@ export async function uploadThemes(distributionId: string, themes: Theme[]): Pro
   const payload = themes.map((theme) => ({
     name: theme.name,
     description: theme.description ?? '',
-    maxGroups: theme.maxGroups ?? 1,
+    groupProportion: theme.groupProportion ?? 1,
   }));
 
   const response = (await api.uploadThemes(distributionId, payload)) as LegacyResponse;

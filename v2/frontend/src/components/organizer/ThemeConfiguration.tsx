@@ -4,13 +4,13 @@ import { Plus, Upload, AlertCircle, FileText, Trash2, ArrowLeft, ArrowRight } fr
 interface Theme {
     name: string;
     description: string;
-    maxGroups: number;
+    groupProportion: number;
 }
 
 interface CommonTheme {
     name: string;
     description: string;
-    maxGroups: number;
+    groupProportion: number;
 }
 
 
@@ -77,11 +77,11 @@ export function ThemeConfiguration({
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Número Ideal de Grupos</label>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Proporção de Grupos (Peso)</label>
                                 <input
                                     type="number"
-                                    value={newTheme.maxGroups}
-                                    onChange={(e) => setNewTheme({ ...newTheme, maxGroups: parseInt(e.target.value) || 0 })}
+                                    value={newTheme.groupProportion}
+                                    onChange={(e) => setNewTheme({ ...newTheme, groupProportion: Math.max(1, parseInt(e.target.value) || 1) })}
                                     className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
                                     min="1"
                                 />
@@ -131,7 +131,7 @@ export function ThemeConfiguration({
                                             <h4 className="font-bold text-slate-900">{theme.name}</h4>
                                             {theme.description && <p className="text-sm text-slate-500 mt-1 line-clamp-1">{theme.description}</p>}
                                             <div className="mt-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                {theme.maxGroups} grupos ideal
+                                                {theme.groupProportion} peso relativo
                                             </div>
                                         </div>
                                         <button
@@ -169,3 +169,4 @@ export function ThemeConfiguration({
         </div>
     );
 }
+

@@ -143,7 +143,26 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
         }
         return { studentsData, studentsMap, students: Array.from(studentsMap.values()) };
     };
-    const buildThemes = (distributionId, themesData) => themesData.map((theme) => new domain_1.Theme(theme.id, distributionId, theme.name, theme.max_groups, theme.description));
+    const parseThemeGroupProportion = (themeData) => {
+        if (Number.isFinite(Number(themeData?.group_proportion))) {
+            const parsed = Number(themeData.group_proportion);
+            return parsed >= 1 ? Math.floor(parsed) : 1;
+        }
+        if (Number.isFinite(Number(themeData?.max_groups))) {
+            const parsed = Number(themeData.max_groups);
+            return parsed >= 1 ? Math.floor(parsed) : 1;
+        }
+        if (Number.isFinite(Number(themeData?.groupProportion))) {
+            const parsed = Number(themeData.groupProportion);
+            return parsed >= 1 ? Math.floor(parsed) : 1;
+        }
+        if (Number.isFinite(Number(themeData?.maxGroups))) {
+            const parsed = Number(themeData.maxGroups);
+            return parsed >= 1 ? Math.floor(parsed) : 1;
+        }
+        return 1;
+    };
+    const buildThemes = (distributionId, themesData) => themesData.map((theme) => new domain_1.Theme(theme.id, distributionId, theme.name, parseThemeGroupProportion(theme), theme.description));
     const buildAffinityMatrix = async (distributionId) => {
         const affinityMatrix = new AffinityMatrix_1.AffinityMatrix();
         const affinitiesData = await database.getAllAffinitiesByDistribution(distributionId);
@@ -172,11 +191,17 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
         }
         return { groups, solution: new domain_1.Solution(groups), rawGroups: solutionGroupsData };
     };
-    const ensureThemeCapacityFeasibility = (students, themes) => {
+    const ensureThemeProportionFeasibility = (students, themes) => {
+        if (!themes.length) {
+            throw new Error('Nenhum tema disponivel para executar distribuicao proporcional');
+        }
         const requiredGroups = (0, groupSizePlanner_1.getPlannedGroupCount)(students.length);
-        const totalThemeCapacity = themes.reduce((sum, theme) => sum + Math.max(0, Number(theme.maxGroups || 0)), 0);
-        if (totalThemeCapacity < requiredGroups) {
-            throw new Error(`Capacidade de temas insuficiente para modo ideal: requiredGroups=${requiredGroups}, totalThemeCapacity=${totalThemeCapacity}`);
+        if (requiredGroups < 0) {
+            throw new Error('Quantidade de grupos planejados invalida');
+        }
+        const totalThemeWeight = themes.reduce((sum, theme) => sum + Math.max(0, Number(theme.groupProportion || 0)), 0);
+        if (totalThemeWeight <= 0) {
+            throw new Error('Soma dos pesos de temas deve ser maior que zero para modo ideal');
         }
     };
     const buildSimulationMetricsPayload = async (distributionId, themes, groups, options) => {
@@ -366,8 +391,8 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
      * Body:
      * {
      *   "themes": [
-     *     { "name": "Tema A", "description": "DescriÃ§Ã£o A", "maxGroups": 2 },
-     *     { "name": "Tema B", "description": "DescriÃ§Ã£o B", "maxGroups": 3 }
+     *     { "name": "Tema A", "description": "DescriÃ§Ã£o A", "groupProportion": 2 },
+     *     { "name": "Tema B", "description": "DescriÃ§Ã£o B", "groupProportion": 3 }
      *   ]
      * }
      *
@@ -411,7 +436,8 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
             // Criar temas
             let themesCreated = 0;
             for (const theme of themes) {
-                await database.createTheme(theme.name, theme.description || '', theme.maxGroups, distributionId);
+                const groupProportion = parseThemeGroupProportion(theme);
+                await database.createTheme(theme.name, theme.description || '', groupProportion, distributionId);
                 themesCreated++;
             }
             const currentStatus = normalizeDistributionStatus(distribution.status);
@@ -539,7 +565,7 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
                     student.setAffinity(aff.target_student_id, aff.level);
                 }
             }
-            const themes = themesData.map((t) => new domain_1.Theme(t.id, distributionId, t.name, t.max_groups, t.description));
+            const themes = themesData.map((t) => new domain_1.Theme(t.id, distributionId, t.name, parseThemeGroupProportion(t), t.description));
             // 3. Executar distribuiÃ§Ã£o
             const engine = new DistributionEngine_1.DistributionEngine();
             const validation = engine.validateScenario(students, themes);
@@ -707,7 +733,7 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
             }
             const students = studentsBuild.students;
             console.log('Themes Data:', JSON.stringify(themesData, null, 2));
-            const themes = themesData.map((t) => new domain_1.Theme(t.id, distributionId, t.name, t.max_groups, t.description));
+            const themes = themesData.map((t) => new domain_1.Theme(t.id, distributionId, t.name, parseThemeGroupProportion(t), t.description));
             // 3. Executar Fase 1
             const engine = new DistributionEngine_1.DistributionEngine(wPref !== undefined || wDup !== undefined || wDiv !== undefined
                 ? { wPref, wDup, wDiv }
@@ -837,7 +863,7 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
                 studentsMap.set(student.id, student);
             }
             // Converter temas
-            const themes = themesData.map((t) => new domain_1.Theme(t.id, distributionId, t.name, t.max_groups, t.description));
+            const themes = themesData.map((t) => new domain_1.Theme(t.id, distributionId, t.name, parseThemeGroupProportion(t), t.description));
             // 2. Buscar soluÃ§Ã£o da Fase 1 do banco e reconstruir objeto Solution
             const solutionGroupsData = await database.getSolution(distributionId);
             if (!solutionGroupsData || solutionGroupsData.length === 0) {
@@ -937,7 +963,7 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
                 return res.status(400).json({ error: 'Nenhum tema registrado na distribuiÃ§Ã£o' });
             }
             const themes = buildThemes(distributionId, themesData);
-            ensureThemeCapacityFeasibility(studentsBuild.students, themes);
+            ensureThemeProportionFeasibility(studentsBuild.students, themes);
             const axisThemeIds = [...SIMULATION_ENERGY_AXIS];
             const vectorState = VectorState_1.VectorState.fromStudents(studentsBuild.students, themes);
             const engine = new DistributionEngine_1.DistributionEngine(wPref !== undefined || wDup !== undefined || wDiv !== undefined
@@ -951,7 +977,7 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
             await database.clearDistributionGroups(distributionId);
             const result = await engine.solvePhase1(studentsBuild.students, themes, {
                 simulationIdeal: true,
-                enforceThemeCapacity: true,
+                enforceThemeProportion: true,
                 runtime: {
                     enabled: true,
                     runId: `adhoc_phase1_${Date.now()}`,
@@ -1034,7 +1060,7 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
                 return res.status(400).json({ error: 'Dados base nÃ£o encontrados para simulaÃ§Ã£o' });
             }
             const themes = buildThemes(distributionId, themesData);
-            ensureThemeCapacityFeasibility(studentsBuild.students, themes);
+            ensureThemeProportionFeasibility(studentsBuild.students, themes);
             const axisThemeIds = [...SIMULATION_ENERGY_AXIS];
             const solutionData = await buildSolutionFromDatabase(distributionId, studentsBuild.studentsMap);
             if (!solutionData.groups.length) {
@@ -1058,7 +1084,7 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
                 maxIterations,
                 temperature,
                 simulationIdeal: true,
-                enforceThemeCapacity: true,
+                enforceThemeProportion: true,
                 runtime: {
                     enabled: true,
                     runId: `adhoc_phase2_${Date.now()}`,
@@ -1157,7 +1183,7 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
             return res.status(400).json({ error: 'Nenhum tema registrado na distribuiÃ§Ã£o' });
         }
         const themes = buildThemes(distributionId, themesData);
-        ensureThemeCapacityFeasibility(studentsBuild.students, themes);
+        ensureThemeProportionFeasibility(studentsBuild.students, themes);
         const axisThemeIds = [...SIMULATION_ENERGY_AXIS];
         const vectorState = VectorState_1.VectorState.fromStudents(studentsBuild.students, themes);
         const initialPositions = vectorState.projectTo3D(axisThemeIds, studentsBuild.students, undefined, buildEnergyProjectionConfig({
@@ -1184,7 +1210,7 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
                 await database.clearDistributionGroups(distributionId);
                 const result = await engine.solvePhase1(studentsBuild.students, themes, {
                     simulationIdeal: true,
-                    enforceThemeCapacity: true,
+                    enforceThemeProportion: true,
                     runtime: {
                         enabled: true,
                         runId: runStarted.runId,
@@ -1264,7 +1290,7 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
             return res.status(400).json({ error: 'Dados base nÃ£o encontrados para simulaÃ§Ã£o' });
         }
         const themes = buildThemes(distributionId, themesData);
-        ensureThemeCapacityFeasibility(studentsBuild.students, themes);
+        ensureThemeProportionFeasibility(studentsBuild.students, themes);
         const solutionData = await buildSolutionFromDatabase(distributionId, studentsBuild.studentsMap);
         if (!solutionData.groups.length) {
             return res.status(400).json({
@@ -1303,7 +1329,7 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
                     maxIterations,
                     temperature,
                     simulationIdeal: true,
-                    enforceThemeCapacity: true,
+                    enforceThemeProportion: true,
                     runtime: {
                         enabled: true,
                         runId: runStarted.runId,

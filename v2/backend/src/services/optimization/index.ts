@@ -9,6 +9,7 @@ export { LocalSearch } from './LocalSearch';
 export { SimulatedAnnealing } from './SimulatedAnnealing';
 export { DistributionEngine } from './DistributionEngine';
 export { SimulationIdealMetricsService } from './SimulationIdealMetricsService';
+export { ThemeQuotaPolicy } from './ThemeQuotaPolicy';
 export { VectorState } from './VectorState';
 export { SimulationRunManager } from './SimulationRuntime';
 export { planGroupSizes, getPlannedGroupCount } from './groupSizePlanner';

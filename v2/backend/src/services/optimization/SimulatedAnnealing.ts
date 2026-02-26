@@ -3,18 +3,21 @@ import { ConstraintValidator } from './ConstraintValidator';
 import { EnergyCalculator } from './EnergyCalculator';
 import { ConstraintRules } from './SystemViabilityAnalyzer';
 import { SimulationRuntimeContext } from './SimulationRuntime';
+import { ThemeQuotaPolicy } from './ThemeQuotaPolicy';
 
 type OptimizationMode = {
   simulationIdeal?: boolean;
+  enforceThemeProportion?: boolean;
   enforceThemeCapacity?: boolean;
   runtime?: SimulationRuntimeContext;
+  themeQuotaPolicy?: ThemeQuotaPolicy;
 };
 
 /**
  * SimulatedAnnealing - global optimization with probabilistic acceptance.
  *
  * Default behavior is unchanged. In ideal simulation mode, affected groups
- * are re-themed after each swap and theme capacity is treated as hard constraint.
+ * are re-themed after each swap and proportional theme quota is treated as hard constraint.
  */
 export class SimulatedAnnealing {
   private validator: ConstraintValidator;
@@ -24,8 +27,8 @@ export class SimulatedAnnealing {
   private maxIterations: number = 20000;
   private themes: Theme[] = [];
   private simulationIdealMode: boolean = false;
-  private enforceThemeCapacity: boolean = false;
-  private themeCapacities: Map<string, number> = new Map();
+  private enforceThemeProportion: boolean = false;
+  private themeQuotaPolicy?: ThemeQuotaPolicy;
   private runtimeContext?: SimulationRuntimeContext;
 
   constructor(
@@ -49,16 +52,9 @@ export class SimulatedAnnealing {
   public optimize(solution: Solution, themes: Theme[], mode?: OptimizationMode): Solution {
     this.themes = themes;
     this.simulationIdealMode = Boolean(mode?.simulationIdeal);
-    this.enforceThemeCapacity = Boolean(mode?.enforceThemeCapacity);
+    this.enforceThemeProportion = Boolean(mode?.enforceThemeProportion ?? mode?.enforceThemeCapacity);
+    this.themeQuotaPolicy = mode?.themeQuotaPolicy;
     this.runtimeContext = mode?.runtime;
-    this.themeCapacities = new Map(
-      themes.map((theme) => [
-        theme.id,
-        Number.isFinite(Number(theme.maxGroups))
-          ? Math.max(1, Number(theme.maxGroups))
-          : Number.MAX_SAFE_INTEGER,
-      ])
-    );
 
     let currentSolution = solution;
     let bestSolution = solution;
@@ -258,59 +254,60 @@ export class SimulatedAnnealing {
       }
     | null {
     const usage = this.buildThemeUsageExcluding(solution, new Set([groupAId, groupBId]));
-
-    const bestA = this.findBestThemeForGroupWithCapacity(groupA, usage);
-    if (!bestA) {
-      return null;
-    }
-
-    usage.set(bestA.theme.id, (usage.get(bestA.theme.id) || 0) + 1);
-
-    const bestB = this.findBestThemeForGroupWithCapacity(groupB, usage);
-    if (!bestB) {
-      return null;
-    }
-
-    return {
-      groupA: bestA,
-      groupB: bestB,
-    };
-  }
-
-  private findBestThemeForGroupWithCapacity(
-    group: Group,
-    usage: Map<string, number>
-  ): { theme: Theme; energy: number } | null {
-    let bestTheme: Theme | null = null;
-    let bestEnergy = Infinity;
-
-    for (const theme of this.themes) {
-      if (this.enforceThemeCapacity) {
-        const used = usage.get(theme.id) || 0;
-        const cap = this.themeCapacities.get(theme.id) || Number.MAX_SAFE_INTEGER;
-        if (used >= cap) {
-          continue;
+    let bestPair:
+      | {
+          groupA: { theme: Theme; energy: number };
+          groupB: { theme: Theme; energy: number };
+          totalEnergy: number;
         }
-      }
+      | null = null;
 
-      const energy = this.energyCalculator.calculateGroupEnergy(group, theme);
-      if (!Number.isFinite(energy)) {
+    for (const themeA of this.themes) {
+      const energyA = this.energyCalculator.calculateGroupEnergy(groupA, themeA);
+      if (!Number.isFinite(energyA)) {
         continue;
       }
 
-      if (energy < bestEnergy) {
-        bestEnergy = energy;
-        bestTheme = theme;
+      for (const themeB of this.themes) {
+        const energyB = this.energyCalculator.calculateGroupEnergy(groupB, themeB);
+        if (!Number.isFinite(energyB)) {
+          continue;
+        }
+
+        const candidateUsage = new Map(usage);
+        candidateUsage.set(themeA.id, (candidateUsage.get(themeA.id) || 0) + 1);
+        candidateUsage.set(themeB.id, (candidateUsage.get(themeB.id) || 0) + 1);
+
+        if (this.enforceThemeProportion && this.themeQuotaPolicy) {
+          const validation = this.themeQuotaPolicy.validateUsage(candidateUsage, {
+            requireMin: true,
+            requireMax: true,
+            requireOrder: true,
+            requireBalance: true,
+          });
+          if (!validation.ok) {
+            continue;
+          }
+        }
+
+        const totalEnergy = energyA + energyB;
+        if (!bestPair || totalEnergy < bestPair.totalEnergy) {
+          bestPair = {
+            groupA: { theme: themeA, energy: energyA },
+            groupB: { theme: themeB, energy: energyB },
+            totalEnergy,
+          };
+        }
       }
     }
 
-    if (!bestTheme) {
+    if (!bestPair) {
       return null;
     }
 
     return {
-      theme: bestTheme,
-      energy: bestEnergy,
+      groupA: bestPair.groupA,
+      groupB: bestPair.groupB,
     };
   }
 

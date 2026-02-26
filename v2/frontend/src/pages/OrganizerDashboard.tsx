@@ -42,8 +42,8 @@ export function OrganizerDashboard() {
     created_at: string;
   }>>([]);
 
-  const [themes, setThemes] = useState<Array<{ name: string; description: string; maxGroups: number }>>([]);
-  const [newTheme, setNewTheme] = useState({ name: '', description: '', maxGroups: 3 });
+  const [themes, setThemes] = useState<Array<{ name: string; description: string; groupProportion: number }>>([]);
+  const [newTheme, setNewTheme] = useState({ name: '', description: '', groupProportion: 1 });
   const [executionReport, setExecutionReport] = useState<string | null>(null);
 
   // Fase 2 - Otimização Social
@@ -118,8 +118,8 @@ export function OrganizerDashboard() {
     }
     const addedTheme = { ...newTheme };
     setThemes([...themes, addedTheme]);
-    // O default do próximo tema herda o maxGroups do tema recém adicionado
-    setNewTheme({ name: '', description: '', maxGroups: addedTheme.maxGroups });
+    // O default do próximo tema herda o groupProportion do tema recém adicionado
+    setNewTheme({ name: '', description: '', groupProportion: addedTheme.groupProportion });
     setError('');
   };
 
@@ -444,3 +444,4 @@ export function OrganizerDashboard() {
     </div>
   );
 }
+

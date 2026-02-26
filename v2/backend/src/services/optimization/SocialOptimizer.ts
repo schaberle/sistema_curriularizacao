@@ -2,14 +2,17 @@ import { Student, Group, Solution, Theme } from '../../domain';
 import { AffinityMatrix } from '../../domain/AffinityMatrix';
 import { EnergyCalculator } from './EnergyCalculator';
 import { SimulationRuntimeContext } from './SimulationRuntime';
+import { ThemeQuotaPolicy } from './ThemeQuotaPolicy';
 
 type SocialOptimizationConfig = {
   wSoc?: number;
   maxIterations?: number;
   temperature?: number;
   simulationIdeal?: boolean;
+  enforceThemeProportion?: boolean;
   enforceThemeCapacity?: boolean;
   runtime?: SimulationRuntimeContext;
+  themeQuotaPolicy?: ThemeQuotaPolicy;
 };
 
 export class SocialOptimizer {
@@ -20,8 +23,8 @@ export class SocialOptimizer {
   private initialTemperature: number = 0.8;
   private themes: Theme[] = [];
   private simulationIdealMode: boolean = false;
-  private enforceThemeCapacity: boolean = false;
-  private themeCapacities: Map<string, number> = new Map();
+  private enforceThemeProportion: boolean = false;
+  private themeQuotaPolicy?: ThemeQuotaPolicy;
   private runtimeContext?: SimulationRuntimeContext;
 
   constructor(
@@ -37,21 +40,16 @@ export class SocialOptimizer {
       this.maxIterations = config.maxIterations ?? this.maxIterations;
       this.initialTemperature = config.temperature ?? this.initialTemperature;
       this.simulationIdealMode = Boolean(config.simulationIdeal);
-      this.enforceThemeCapacity = Boolean(config.enforceThemeCapacity);
+      this.enforceThemeProportion = Boolean(
+        config.enforceThemeProportion ?? config.enforceThemeCapacity
+      );
+      this.themeQuotaPolicy = config.themeQuotaPolicy;
       this.runtimeContext = config.runtime;
     }
   }
 
   public optimize(solution: Solution, themes: Theme[]): Solution {
     this.themes = themes;
-    this.themeCapacities = new Map(
-      themes.map((theme) => [
-        theme.id,
-        Number.isFinite(Number(theme.maxGroups))
-          ? Math.max(1, Number(theme.maxGroups))
-          : Number.MAX_SAFE_INTEGER,
-      ])
-    );
 
     const baselineStudentGroupMap = this.buildStudentGroupMap(solution);
 
@@ -312,7 +310,7 @@ export class SocialOptimizer {
       maxIterations: this.maxIterations,
       initialTemperature: this.initialTemperature,
       simulationIdeal: this.simulationIdealMode,
-      enforceThemeCapacity: this.enforceThemeCapacity,
+      enforceThemeProportion: this.enforceThemeProportion,
     };
   }
 
@@ -365,60 +363,62 @@ export class SocialOptimizer {
       }
     | null {
     const usage = this.buildThemeUsageExcluding(solution, new Set([groupAId, groupBId]));
-
-    const bestA = this.findBestThemeForGroupWithCapacity(groupA, usage);
-    if (!bestA) {
-      return null;
-    }
-
-    usage.set(bestA.theme.id, (usage.get(bestA.theme.id) || 0) + 1);
-
-    const bestB = this.findBestThemeForGroupWithCapacity(groupB, usage);
-    if (!bestB) {
-      return null;
-    }
-
-    return {
-      groupA: bestA,
-      groupB: bestB,
-    };
-  }
-
-  private findBestThemeForGroupWithCapacity(
-    group: Group,
-    usage: Map<string, number>
-  ): { theme: Theme; energy: number } | null {
-    let bestTheme: Theme | null = null;
-    let bestEnergy = Infinity;
-
-    for (const theme of this.themes) {
-      if (this.enforceThemeCapacity) {
-        const used = usage.get(theme.id) || 0;
-        const cap = this.themeCapacities.get(theme.id) || Number.MAX_SAFE_INTEGER;
-        if (used >= cap) {
-          continue;
+    let bestPair:
+      | {
+          groupA: { theme: Theme; energy: number };
+          groupB: { theme: Theme; energy: number };
+          totalEnergy: number;
         }
-      }
+      | null = null;
 
-      const baseEnergy = this.energyCalculator.calculateGroupEnergy(group, theme);
-      if (!Number.isFinite(baseEnergy)) {
+    for (const themeA of this.themes) {
+      const baseEnergyA = this.energyCalculator.calculateGroupEnergy(groupA, themeA);
+      if (!Number.isFinite(baseEnergyA)) {
         continue;
       }
+      const energyA = baseEnergyA + this.calculateGroupSocialEnergy(groupA);
 
-      const energy = baseEnergy + this.calculateGroupSocialEnergy(group);
-      if (energy < bestEnergy) {
-        bestEnergy = energy;
-        bestTheme = theme;
+      for (const themeB of this.themes) {
+        const baseEnergyB = this.energyCalculator.calculateGroupEnergy(groupB, themeB);
+        if (!Number.isFinite(baseEnergyB)) {
+          continue;
+        }
+        const energyB = baseEnergyB + this.calculateGroupSocialEnergy(groupB);
+
+        const candidateUsage = new Map(usage);
+        candidateUsage.set(themeA.id, (candidateUsage.get(themeA.id) || 0) + 1);
+        candidateUsage.set(themeB.id, (candidateUsage.get(themeB.id) || 0) + 1);
+
+        if (this.enforceThemeProportion && this.themeQuotaPolicy) {
+          const validation = this.themeQuotaPolicy.validateUsage(candidateUsage, {
+            requireMin: true,
+            requireMax: true,
+            requireOrder: true,
+            requireBalance: true,
+          });
+          if (!validation.ok) {
+            continue;
+          }
+        }
+
+        const totalEnergy = energyA + energyB;
+        if (!bestPair || totalEnergy < bestPair.totalEnergy) {
+          bestPair = {
+            groupA: { theme: themeA, energy: energyA },
+            groupB: { theme: themeB, energy: energyB },
+            totalEnergy,
+          };
+        }
       }
     }
 
-    if (!bestTheme) {
+    if (!bestPair) {
       return null;
     }
 
     return {
-      theme: bestTheme,
-      energy: bestEnergy,
+      groupA: bestPair.groupA,
+      groupB: bestPair.groupB,
     };
   }
 

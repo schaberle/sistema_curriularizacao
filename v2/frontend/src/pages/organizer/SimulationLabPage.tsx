@@ -173,7 +173,7 @@ export function SimulationLabPage() {
   const [simulationGroups, setSimulationGroups] = useState<SimulationGroupMetrics[]>([]);
   const [seedConfig, setSeedConfig] = useState<SeedConfig>(DEFAULT_SIMULATION_SEED);
   const [templateThemeCount, setTemplateThemeCount] = useState(8);
-  const [templateThemeCapacity, setTemplateThemeCapacity] = useState(3);
+  const [templateThemeProportion, setTemplateThemeProportion] = useState(1);
   const [isExecutingPhase1, setIsExecutingPhase1] = useState(false);
   const [isExecutingPhase2, setIsExecutingPhase2] = useState(false);
   const [simulationError, setSimulationError] = useState<string | null>(null);
@@ -308,17 +308,17 @@ export function SimulationLabPage() {
     }
 
     const count = Math.max(1, Math.min(30, Math.floor(templateThemeCount)));
-    const maxGroups = Math.max(1, Math.floor(templateThemeCapacity));
+    const groupProportion = Math.max(1, Math.floor(templateThemeProportion));
 
     const generatedThemes: Theme[] = Array.from({ length: count }, (_, index) => ({
       name: `Tema ${index + 1}`,
       description: `Tema de simulacao ${index + 1}`,
-      maxGroups,
+      groupProportion,
     }));
 
     try {
       await saveThemes(distributionId, generatedThemes);
-      appendLog('success', `Template aplicado: ${count} temas`, `Capacidade base: ${maxGroups} grupos por tema`);
+      appendLog('success', `Template aplicado: ${count} temas`, `Peso base: ${groupProportion} por tema`);
       addToast({ type: 'success', message: 'Temas de simulacao aplicados' });
     } catch (error: any) {
       const message = error?.message || 'Falha ao aplicar temas';
@@ -492,9 +492,13 @@ export function SimulationLabPage() {
       addToast({ type: 'success', message: 'Run da Fase 1 iniciado' });
     } catch (error: any) {
       let message = error?.message || 'Falha na Fase 1';
-      const capacityMatch = /requiredGroups=(\d+),\s*totalThemeCapacity=(\d+)/i.exec(String(message));
-      if (capacityMatch) {
-        message = `Capacidade de temas insuficiente para modo ideal: necessario ${capacityMatch[1]} grupo(s), disponivel ${capacityMatch[2]}.`;
+      const proportionMatch = /requiredGroups=(\d+),\s*totalTarget=(\d+)/i.exec(String(message));
+      if (proportionMatch) {
+        message = `Inconsistencia de proporcao de temas: grupos necessarios ${proportionMatch[1]}, alvo calculado ${proportionMatch[2]}.`;
+      }
+      const weightMatch = /totalThemeWeight=0/i.exec(String(message));
+      if (weightMatch) {
+        message = 'Soma dos pesos dos temas deve ser maior que zero para executar a Fase 1 ideal.';
       }
       setSimulationError(message);
       setRunStatus('failed');
@@ -537,9 +541,8 @@ export function SimulationLabPage() {
   const themesReady = themes.length > 0;
   const hasStudents = (statistics?.totalStudents ?? 0) >= 4;
   const hasPreferences = (statistics?.studentsWithPreferences ?? 0) > 0;
-  const requiredGroups = Math.ceil((statistics?.totalStudents ?? 0) / 4);
-  const totalThemeCapacity = themes.reduce((sum, theme) => sum + (theme.maxGroups ?? 0), 0);
-  const hasEnoughThemeCapacity = requiredGroups === 0 || totalThemeCapacity >= requiredGroups;
+  const totalThemeWeight = themes.reduce((sum, theme) => sum + (theme.groupProportion ?? 0), 0);
+  const hasValidThemeProportion = totalThemeWeight > 0;
   const phase1Done = PHASE1_COMPLETE_STATUSES.has(status) || simulationGroups.length > 0;
   const hasAffinities = (statistics?.studentsWithAffinities ?? 0) > 0;
   const phase2Done = PHASE2_COMPLETE_STATUSES.has(status);
@@ -561,9 +564,9 @@ export function SimulationLabPage() {
       {
         id: 'phase1',
         label: '3. Fase 1 (grupos iniciais)',
-        done: phase1Done && hasEnoughThemeCapacity,
-        detail: !hasEnoughThemeCapacity
-          ? `Capacidade insuficiente: ${totalThemeCapacity} < ${requiredGroups}`
+        done: phase1Done && hasValidThemeProportion,
+        detail: !hasValidThemeProportion
+          ? 'Peso total invalido: configure temas com peso >= 1'
           : phase1Done
             ? `${simulationGroups.length} grupos gerados`
             : 'Execute a Fase 1',
@@ -593,9 +596,7 @@ export function SimulationLabPage() {
       hasAffinities,
       statistics?.studentsWithAffinities,
       phase2Done,
-      hasEnoughThemeCapacity,
-      totalThemeCapacity,
-      requiredGroups,
+      hasValidThemeProportion,
     ]
   );
 
@@ -622,7 +623,7 @@ export function SimulationLabPage() {
   );
 
   const isRunBusy = runStatus === 'running' || runStatus === 'starting';
-  const canRunPhase1 = themesReady && hasStudents && hasPreferences && hasEnoughThemeCapacity && !isRunBusy;
+  const canRunPhase1 = themesReady && hasStudents && hasPreferences && hasValidThemeProportion && !isRunBusy;
   const canRunPhase2 = phase1Done && hasAffinities && !isRunBusy;
   const effectivePartition = useMemo<VisualGroupPartition>(() => {
     if (!visualState) {
@@ -702,13 +703,13 @@ export function SimulationLabPage() {
             </label>
             <label className="block">
               <span className="mb-1 block font-medium text-slate-700">Maximo de grupos por tema</span>
-              <input
-                type="number"
-                min={1}
-                value={templateThemeCapacity}
-                onChange={(event) => setTemplateThemeCapacity(Math.max(1, Math.floor(parseNumber(event.target.value, 2))))}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2"
-              />
+                <input
+                  type="number"
+                  min={1}
+                  value={templateThemeProportion}
+                  onChange={(event) => setTemplateThemeProportion(Math.max(1, Math.floor(parseNumber(event.target.value, 1))))}
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2"
+                />
             </label>
             <Button
               variant="secondary"
@@ -721,12 +722,11 @@ export function SimulationLabPage() {
             </Button>
             <p className="text-xs text-slate-500">Temas atuais: {themes.length}</p>
             <p className="text-xs text-slate-500">
-              Capacidade atual: {totalThemeCapacity} grupo(s)
-              {requiredGroups > 0 ? ` | Necessaria: ${requiredGroups}` : ''}
+              Peso total atual: {totalThemeWeight}
             </p>
-            {!hasEnoughThemeCapacity && requiredGroups > 0 && (
+            {!hasValidThemeProportion && (
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                Aumente `maxGroups` dos temas ou reduza alunos do seed para executar a Fase 1 ideal.
+                Configure pesos validos (>= 1) para todos os temas antes de executar a Fase 1 ideal.
               </p>
             )}
           </div>

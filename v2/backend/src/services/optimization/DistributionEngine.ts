@@ -8,10 +8,12 @@ import { AffinityMatrix } from '../../domain/AffinityMatrix';
 import { AdaptiveConstraintManager } from './AdaptiveConstraintManager';
 import { SimulationRuntimeContext } from './SimulationRuntime';
 import { getPlannedGroupCount } from './groupSizePlanner';
+import { ThemeQuotaPolicy } from './ThemeQuotaPolicy';
 
 export type Phase1ExecutionOptions = {
   temperature?: number;
   simulationIdeal?: boolean;
+  enforceThemeProportion?: boolean;
   enforceThemeCapacity?: boolean;
   runtime?: SimulationRuntimeContext;
 };
@@ -21,6 +23,7 @@ export type Phase2ExecutionOptions = {
   maxIterations?: number;
   temperature?: number;
   simulationIdeal?: boolean;
+  enforceThemeProportion?: boolean;
   enforceThemeCapacity?: boolean;
   runtime?: SimulationRuntimeContext;
 };
@@ -54,6 +57,9 @@ export class DistributionEngine {
     constraintAdaptation?: { adapted: boolean; reason?: string };
   }> {
     const startTime = Date.now();
+    const enforceThemeProportion = Boolean(
+      options?.enforceThemeProportion ?? options?.enforceThemeCapacity
+    );
 
     if (students.length === 0 || themes.length === 0) {
       return {
@@ -64,8 +70,13 @@ export class DistributionEngine {
       };
     }
 
-    if (options?.simulationIdeal && options?.enforceThemeCapacity) {
-      this.assertThemeCapacityFeasibility(students, themes);
+    const themeQuotaPolicy =
+      options?.simulationIdeal && enforceThemeProportion
+        ? new ThemeQuotaPolicy(themes, getPlannedGroupCount(students.length))
+        : undefined;
+
+    if (options?.simulationIdeal && enforceThemeProportion) {
+      this.assertThemeProportionFeasibility(students, themes, themeQuotaPolicy);
     }
 
     const constraintState = this.constraintManager.analyzeAndAdapt(students, themes);
@@ -77,7 +88,7 @@ export class DistributionEngine {
     }
 
     const phase1Start = Date.now();
-    let solution = this.generator.generateInitialSolution(students, themes);
+    let solution = this.generator.generateInitialSolution(students, themes, themeQuotaPolicy);
     const generationTime = Date.now() - phase1Start;
 
     this.emitRuntimeSnapshot(options?.runtime, 'initial', 0, solution, this.calculateObjectiveEnergy(solution, themes, options?.runtime));
@@ -86,23 +97,25 @@ export class DistributionEngine {
     solution = this.localSearch.optimize(solution, themes, {
       temperature: options?.temperature,
       simulationIdeal: options?.simulationIdeal,
-      enforceThemeCapacity: options?.enforceThemeCapacity,
+      enforceThemeProportion,
       runtime: options?.runtime,
+      themeQuotaPolicy,
     });
     const localSearchTime = Date.now() - phase2Start;
 
     const phase3Start = Date.now();
     solution = this.simulatedAnnealing.optimize(solution, themes, {
       simulationIdeal: options?.simulationIdeal,
-      enforceThemeCapacity: options?.enforceThemeCapacity,
+      enforceThemeProportion,
       runtime: options?.runtime,
+      themeQuotaPolicy,
     });
     const annealingTime = Date.now() - phase3Start;
 
     solution.totalEnergy = this.calculateSolutionEnergy(solution, themes);
 
-    if (options?.simulationIdeal && options?.enforceThemeCapacity) {
-      this.assertSolutionThemeCapacity(solution, themes);
+    if (options?.simulationIdeal && enforceThemeProportion) {
+      this.assertSolutionThemeQuota(solution, themeQuotaPolicy);
     }
 
     return {
@@ -155,6 +168,9 @@ export class DistributionEngine {
     };
   }> {
     const startTime = Date.now();
+    const enforceThemeProportion = Boolean(
+      config?.enforceThemeProportion ?? config?.enforceThemeCapacity
+    );
 
     const metricsBefore = {
       energy: this.calculateSolutionEnergy(phase1Solution, themes),
@@ -185,8 +201,12 @@ export class DistributionEngine {
       maxIterations: config?.maxIterations,
       temperature: config?.temperature,
       simulationIdeal: config?.simulationIdeal,
-      enforceThemeCapacity: config?.enforceThemeCapacity,
+      enforceThemeProportion,
       runtime: config?.runtime,
+      themeQuotaPolicy:
+        config?.simulationIdeal && enforceThemeProportion
+          ? new ThemeQuotaPolicy(themes, phase1Solution.groups.length)
+          : undefined,
     });
 
     const optimizationStart = Date.now();
@@ -195,8 +215,8 @@ export class DistributionEngine {
 
     solution.totalEnergy = this.calculateSolutionEnergy(solution, themes);
 
-    if (config?.simulationIdeal && config?.enforceThemeCapacity) {
-      this.assertSolutionThemeCapacity(solution, themes);
+    if (config?.simulationIdeal && enforceThemeProportion) {
+      this.assertSolutionThemeQuota(solution, new ThemeQuotaPolicy(themes, solution.groups.length));
     }
 
     const metricsAfter = {
@@ -334,31 +354,50 @@ export class DistributionEngine {
     return cohesion;
   }
 
-  private assertThemeCapacityFeasibility(students: Student[], themes: Theme[]): void {
+  private assertThemeProportionFeasibility(
+    students: Student[],
+    themes: Theme[],
+    quotaPolicy?: ThemeQuotaPolicy
+  ): void {
     const requiredGroups = getPlannedGroupCount(students.length);
-    const totalThemeCapacity = themes.reduce((sum, theme) => sum + Math.max(0, Number(theme.maxGroups || 0)), 0);
+    if (requiredGroups < 0) {
+      throw new Error('Planned groups is invalid for ideal simulation mode.');
+    }
 
-    if (totalThemeCapacity < requiredGroups) {
+    const totalThemeWeight = themes.reduce((sum, theme) => sum + Math.max(0, Number(theme.groupProportion || 0)), 0);
+    if (totalThemeWeight <= 0) {
+      throw new Error('Theme proportion is infeasible for ideal simulation mode. totalThemeWeight=0');
+    }
+
+    if (!quotaPolicy) {
+      return;
+    }
+
+    const totalTarget = quotaPolicy.getRanges().reduce((sum, range) => sum + range.target, 0);
+    if (totalTarget !== requiredGroups) {
       throw new Error(
-        `Theme capacity is infeasible for ideal simulation mode. requiredGroups=${requiredGroups}, totalThemeCapacity=${totalThemeCapacity}`
+        `Theme proportion target mismatch for ideal simulation mode. requiredGroups=${requiredGroups}, totalTarget=${totalTarget}`
       );
     }
   }
 
-  private assertSolutionThemeCapacity(solution: Solution, themes: Theme[]): void {
-    const usage = new Map<string, number>();
-    for (const group of solution.groups) {
-      usage.set(group.themeId, (usage.get(group.themeId) || 0) + 1);
+  private assertSolutionThemeQuota(solution: Solution, quotaPolicy?: ThemeQuotaPolicy): void {
+    if (!quotaPolicy) {
+      return;
     }
 
-    for (const theme of themes) {
-      const used = usage.get(theme.id) || 0;
-      const cap = Math.max(0, Number(theme.maxGroups || 0));
-      if (used > cap) {
-        throw new Error(
-          `Theme capacity exceeded in ideal simulation mode. theme=${theme.id}, used=${used}, capacity=${cap}`
-        );
-      }
+    const usage = quotaPolicy.buildUsageFromGroups(solution.groups);
+    const validation = quotaPolicy.validateUsage(usage, {
+      requireMin: true,
+      requireMax: true,
+      requireOrder: true,
+      requireBalance: true,
+    });
+
+    if (!validation.ok) {
+      throw new Error(
+        `Theme proportion violated in ideal simulation mode. ${validation.violations.join(' | ')}`
+      );
     }
   }
 

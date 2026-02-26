@@ -154,8 +154,32 @@ describe('Validation Middleware', () => {
     it('should pass with valid themes', () => {
       mockReq.body = {
         themes: [
+          { name: 'Tema A', description: 'Descrição A', groupProportion: 2 },
+          { name: 'Tema B', description: 'Descrição B', groupProportion: 3 },
+        ],
+      };
+
+      validateThemeUpload(mockReq as Request, mockRes as Response, mockNext);
+
+      expect(mockNext).toHaveBeenCalled();
+    });
+
+    it('should pass with legacy maxGroups alias', () => {
+      mockReq.body = {
+        themes: [
           { name: 'Tema A', description: 'Descrição A', maxGroups: 2 },
-          { name: 'Tema B', description: 'Descrição B', maxGroups: 3 },
+        ],
+      };
+
+      validateThemeUpload(mockReq as Request, mockRes as Response, mockNext);
+
+      expect(mockNext).toHaveBeenCalled();
+    });
+
+    it('should pass with default groupProportion when omitted', () => {
+      mockReq.body = {
+        themes: [
+          { name: 'Tema A', description: 'Descrição A' },
         ],
       };
 
@@ -174,10 +198,10 @@ describe('Validation Middleware', () => {
       expect(mockRes.status).toHaveBeenCalledWith(400);
     });
 
-    it('should fail with invalid maxGroups', () => {
+    it('should fail with invalid groupProportion', () => {
       mockReq.body = {
         themes: [
-          { name: 'Tema', description: 'Desc', maxGroups: 0 },
+          { name: 'Tema', description: 'Desc', groupProportion: 0 },
         ],
       };
 

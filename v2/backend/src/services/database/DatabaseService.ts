@@ -1060,7 +1060,7 @@ export class DatabaseService {
   async createTheme(
     name: string,
     description: string,
-    maxGroups: number,
+    groupProportion: number,
     distributionId: string
   ): Promise<string> {
     const { data, error } = await this.client
@@ -1068,7 +1068,7 @@ export class DatabaseService {
       .insert({
         name,
         description,
-        max_groups: maxGroups,
+        group_proportion: groupProportion,
         distribution_id: distributionId,
         created_at: new Date().toISOString(),
       })

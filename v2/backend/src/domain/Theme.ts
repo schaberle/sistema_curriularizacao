@@ -1,73 +1,72 @@
 import { ThemeData } from './types';
 
 /**
- * Classe Theme - Representa um tema/projeto da atividade
+ * Classe Theme - Representa um tema/projeto da atividade.
  *
  * Um tema tem:
- * - ID único
- * - Nome e descrição
- * - Número máximo de grupos permitidos
- * - Timestamp de criação
+ * - ID unico
+ * - Nome e descricao
+ * - Peso de proporcao para distribuicao de grupos
+ * - Timestamp de criacao
  */
 export class Theme {
   id: string;
   distributionId: string;
   name: string;
   description?: string;
-  maxGroups: number;
+  groupProportion: number;
   createdAt: Date;
   updatedAt: Date;
 
   /**
    * Constructor
-   * @param id ID único do tema (UUID ou slug)
-   * @param distributionId ID da distribuição a que pertence
+   * @param id ID unico do tema (UUID ou slug)
+   * @param distributionId ID da distribuicao a que pertence
    * @param name Nome do tema
-   * @param maxGroups Número máximo de grupos que podem escolher este tema
-   * @param description Descrição opcional
+   * @param groupProportion Peso proporcional para distribuicao de grupos
+   * @param description Descricao opcional
    */
   constructor(
     id: string,
     distributionId: string,
     name: string,
-    maxGroups: number,
+    groupProportion: number,
     description?: string,
     createdAt: Date = new Date(),
     updatedAt: Date = new Date()
   ) {
     if (!id || id.trim() === '') {
-      throw new Error('ID do tema não pode estar vazio');
+      throw new Error('ID do tema nao pode estar vazio');
     }
     if (!distributionId || distributionId.trim() === '') {
-      throw new Error('ID da distribuição não pode estar vazio');
+      throw new Error('ID da distribuicao nao pode estar vazio');
     }
     if (!name || name.trim() === '') {
       console.warn(`[WARN] TEMA SEM NOME DETECTADO. ID: ${id}. Usando placeholder.`);
       name = `Tema ${id.substring(0, 8)}`;
-      // throw new Error(`Nome do tema não pode estar vazio. ID: ${id}, Name type: ${typeof name}, Name value: ${name}`);
     }
-    if (!Number.isInteger(maxGroups) || maxGroups < 1) {
-      throw new Error(`maxGroups deve ser um inteiro >= 1, recebeu: ${maxGroups}`);
+    if (!Number.isInteger(groupProportion) || groupProportion < 1) {
+      throw new Error(`groupProportion deve ser um inteiro >= 1, recebeu: ${groupProportion}`);
     }
 
     this.id = id;
     this.distributionId = distributionId;
     this.name = name.trim();
-    this.maxGroups = maxGroups;
+    this.groupProportion = groupProportion;
     this.description = description?.trim();
     this.createdAt = createdAt;
     this.updatedAt = updatedAt;
   }
 
   /**
-   * Obtém representação string do tema
+   * Obtem representacao string do tema.
    */
   toString(): string {
-    return `${this.name} (${this.id}) - Max ${this.maxGroups} grupos`;
+    return `${this.name} (${this.id}) - Peso ${this.groupProportion}`;
   }
 
   /**
-   * Obtém representação JSON
+   * Obtem representacao JSON.
    */
   toJSON() {
     return {
@@ -75,21 +74,26 @@ export class Theme {
       distributionId: this.distributionId,
       name: this.name,
       description: this.description,
-      maxGroups: this.maxGroups,
+      groupProportion: this.groupProportion,
       createdAt: this.createdAt,
-      updatedAt: this.updatedAt
+      updatedAt: this.updatedAt,
     };
   }
 
   /**
-   * Cria Theme a partir de dados do banco
+   * Cria Theme a partir de dados do banco.
    */
   static fromData(data: ThemeData): Theme {
+    const rawGroupProportion =
+      Number.isFinite(Number(data.group_proportion))
+        ? Number(data.group_proportion)
+        : Number(data.max_groups);
+
     return new Theme(
       data.id,
       data.distribution_id,
       data.name,
-      data.max_groups,
+      Number.isInteger(rawGroupProportion) && rawGroupProportion > 0 ? rawGroupProportion : 1,
       data.description,
       new Date(data.created_at),
       new Date(data.updated_at)
