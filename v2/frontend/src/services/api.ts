@@ -19,6 +19,8 @@ import type {
   SocialMetrics,
   Statistics,
   Theme,
+  OrganizerStudentSearchCandidate,
+  OrganizerStudentRemovalResult,
   VisualAffinityEdge,
   VisualGroupPartition,
   VisualStudentNode,
@@ -833,6 +835,26 @@ class APIClient {
     return response.data;
   }
 
+  async searchDistributionStudents(distributionId: string, query: string, limit: number = 20) {
+    const response = await this.client.get(
+      `/api/organizer/distributions/${distributionId}/students/search`,
+      {
+        params: {
+          q: query,
+          limit,
+        },
+      }
+    );
+    return response.data;
+  }
+
+  async removeDistributionStudent(distributionId: string, studentId: string) {
+    const response = await this.client.delete(
+      `/api/organizer/distributions/${distributionId}/students/${studentId}`
+    );
+    return response.data;
+  }
+
   async syncStudentRegistryAllDistributions() {
     const response = await this.client.post('/api/organizer/student-registry/sync-all');
     return response.data;
@@ -1149,6 +1171,39 @@ export async function getDistributionStatistics(distributionId: string): Promise
   const response = (await api.getDistributionStatistics(distributionId)) as LegacyResponse<any>;
   const data = ensureSuccess(response, 'Falha ao carregar estatÃ­sticas');
   return normalizeStatistics(data, distributionId);
+}
+
+export async function searchOrganizerStudents(
+  distributionId: string,
+  query: string,
+  limit: number = 20
+): Promise<OrganizerStudentSearchCandidate[]> {
+  const response = (await api.searchDistributionStudents(distributionId, query, limit)) as LegacyResponse<any>;
+  const data = ensureSuccess(response, 'Falha ao buscar alunos para exclusao');
+
+  return (data.students ?? []).map((student: any) => ({
+    id: String(student?.id ?? ''),
+    name: String(student?.name ?? ''),
+    course: String(student?.course ?? '').toUpperCase() === 'ME' ? 'ME' : 'EE',
+    phase: Number(student?.phase ?? 0),
+  }));
+}
+
+export async function removeOrganizerStudent(
+  distributionId: string,
+  studentId: string
+): Promise<OrganizerStudentRemovalResult> {
+  const response = (await api.removeDistributionStudent(distributionId, studentId)) as LegacyResponse<any>;
+  const data = ensureSuccess(response, 'Falha ao remover aluno');
+
+  return {
+    distributionId: String(data.distributionId ?? distributionId),
+    studentId: String(data.studentId ?? studentId),
+    registryDeactivated: Boolean(data.registryDeactivated),
+    operationalStudentRemoved: Boolean(data.operationalStudentRemoved),
+    phase1NeedsRerun: Boolean(data.phase1NeedsRerun),
+    phase2NeedsRerun: Boolean(data.phase2NeedsRerun),
+  };
 }
 
 export async function executePhase1(

@@ -50,6 +50,22 @@ export interface Statistics {
   lastUpdated: string;
 }
 
+export interface OrganizerStudentSearchCandidate {
+  id: string;
+  name: string;
+  course: 'EE' | 'ME';
+  phase: number;
+}
+
+export interface OrganizerStudentRemovalResult {
+  distributionId: string;
+  studentId: string;
+  registryDeactivated: boolean;
+  operationalStudentRemoved: boolean;
+  phase1NeedsRerun: boolean;
+  phase2NeedsRerun: boolean;
+}
+
 export interface Phase1Config {
   wPref: number;    // Weight for preferences (default: 1.0)
   wDup: number;     // Weight for phase duplicates (default: 0.9)

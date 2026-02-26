@@ -626,6 +626,116 @@ export class DatabaseService {
     return data || [];
   }
 
+  /**
+   * Desativa um aluno no registro oficial por hash de matricula.
+   * Retorna true quando ao menos uma linha ativa foi desativada.
+   */
+  async deactivateStudentRegistryEntry(
+    distributionId: string,
+    matriculaHash: string
+  ): Promise<boolean> {
+    const normalizedHash = String(matriculaHash || '').trim().toLowerCase();
+    if (!normalizedHash) {
+      return false;
+    }
+
+    const { data, error } = await this.client
+      .from('student_registry')
+      .update({
+        active: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('distribution_id', distributionId)
+      .eq('matricula_hash', normalizedHash)
+      .eq('active', true)
+      .select('id');
+
+    if (error) {
+      throw error;
+    }
+
+    return Array.isArray(data) && data.length > 0;
+  }
+
+  /**
+   * Remove um aluno da distribuicao e limpa dados correlatos.
+   * Retorna false quando o aluno nao pertence a distribuicao.
+   */
+  async deleteStudentAndRelatedData(
+    distributionId: string,
+    studentId: string
+  ): Promise<boolean> {
+    const { data: student, error: studentError } = await this.client
+      .from('students')
+      .select('id')
+      .eq('id', studentId)
+      .eq('distribution_id', distributionId)
+      .single();
+
+    if (studentError && studentError.code !== 'PGRST116') {
+      throw studentError;
+    }
+
+    if (!student) {
+      return false;
+    }
+
+    const { error: groupStudentsError } = await this.client
+      .from('group_students')
+      .delete()
+      .eq('student_id', studentId);
+    if (groupStudentsError) {
+      throw groupStudentsError;
+    }
+
+    const { error: prefsError } = await this.client
+      .from('student_preferences')
+      .delete()
+      .eq('student_id', studentId);
+    if (prefsError) {
+      throw prefsError;
+    }
+
+    const { error: affinitiesBySourceError } = await this.client
+      .from('student_affinities')
+      .delete()
+      .eq('student_id', studentId);
+    if (affinitiesBySourceError) {
+      throw affinitiesBySourceError;
+    }
+
+    const { error: affinitiesByTargetError } = await this.client
+      .from('student_affinities')
+      .delete()
+      .eq('target_student_id', studentId);
+    if (affinitiesByTargetError) {
+      throw affinitiesByTargetError;
+    }
+
+    const { error: sessionsError } = await this.client
+      .from('student_sessions')
+      .update({
+        revoked_at: new Date().toISOString(),
+        revoke_reason: 'removed_by_organizer',
+      })
+      .eq('student_id', studentId)
+      .is('revoked_at', null);
+    if (sessionsError) {
+      throw sessionsError;
+    }
+
+    const { error: studentDeleteError } = await this.client
+      .from('students')
+      .delete()
+      .eq('id', studentId)
+      .eq('distribution_id', distributionId);
+    if (studentDeleteError) {
+      throw studentDeleteError;
+    }
+
+    return true;
+  }
+
   // ============================================================
   // STUDENT_REGISTRY - Registro oficial de alunos
   // ============================================================

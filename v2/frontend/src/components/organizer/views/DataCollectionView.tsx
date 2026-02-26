@@ -3,11 +3,12 @@
  * Presentation layer for student data collection step
  */
 
-import { Statistics } from '../../../types/distribution.types';
+import { OrganizerStudentSearchCandidate, Statistics } from '../../../types/distribution.types';
 import { Card } from '../../common/Card';
 import { Button } from '../../common/Button';
 import { StatisticsSection } from '../sections/StatisticsSection';
 import { StudentLinkSection } from '../sections/StudentLinkSection';
+import { StudentRemovalSection } from '../sections/StudentRemovalSection';
 
 interface DataCollectionViewProps {
   statistics: Statistics | null;
@@ -18,6 +19,9 @@ interface DataCollectionViewProps {
   onRefreshStatistics?: () => void;
   onNext: () => void;
   onPrevious: () => void;
+  onSearchStudentsToRemove: (query: string) => Promise<OrganizerStudentSearchCandidate[]>;
+  onRemoveStudent: (student: OrganizerStudentSearchCandidate) => Promise<void>;
+  removingStudentId?: string | null;
 }
 
 export function DataCollectionView({
@@ -27,6 +31,9 @@ export function DataCollectionView({
   onRefreshStatistics,
   onNext,
   onPrevious,
+  onSearchStudentsToRemove,
+  onRemoveStudent,
+  removingStudentId = null,
 }: DataCollectionViewProps) {
   const totalStudents = statistics?.totalStudents ?? 0;
   const studentsWithPreferences = statistics?.studentsWithPreferences ?? 0;
@@ -60,6 +67,18 @@ export function DataCollectionView({
               statistics={statistics}
               loading={loading.fetchStatistics}
               onRefresh={onRefreshStatistics}
+            />
+          </Card>
+
+          <Card
+            title="Remover aluno"
+            subtitle="Pesquise por nome e exclua alunos que sairam da turma"
+            padding="lg"
+          >
+            <StudentRemovalSection
+              onSearch={onSearchStudentsToRemove}
+              onRemove={onRemoveStudent}
+              isRemovingStudentId={removingStudentId}
             />
           </Card>
         </div>

@@ -1,7 +1,8 @@
 import { RefreshCw } from 'lucide-react';
 import { Button } from '../../common/Button';
 import { Card } from '../../common/Card';
-import { Statistics } from '../../../types/distribution.types';
+import { OrganizerStudentSearchCandidate, Statistics } from '../../../types/distribution.types';
+import { StudentRemovalSection } from '../sections/StudentRemovalSection';
 
 interface Phase2AffinitiesViewProps {
   statistics: Statistics | null;
@@ -13,6 +14,9 @@ interface Phase2AffinitiesViewProps {
   onRefresh: () => void;
   onNext: () => void;
   onPrevious: () => void;
+  onSearchStudentsToRemove: (query: string) => Promise<OrganizerStudentSearchCandidate[]>;
+  onRemoveStudent: (student: OrganizerStudentSearchCandidate) => Promise<void>;
+  removingStudentId?: string | null;
 }
 
 export function Phase2AffinitiesView({
@@ -23,6 +27,9 @@ export function Phase2AffinitiesView({
   onRefresh,
   onNext,
   onPrevious,
+  onSearchStudentsToRemove,
+  onRemoveStudent,
+  removingStudentId = null,
 }: Phase2AffinitiesViewProps) {
   const totalStudents = statistics?.totalStudents ?? 0;
   const studentsWithAffinities = statistics?.studentsWithAffinities ?? 0;
@@ -88,6 +95,18 @@ export function Phase2AffinitiesView({
             <p className="mt-1 text-2xl font-extrabold text-slate-900">{affinityRate.toFixed(1)}%</p>
           </div>
         </div>
+      </Card>
+
+      <Card
+        title="Remover aluno"
+        subtitle="Pesquise por nome e exclua alunos que sairam da turma"
+        padding="lg"
+      >
+        <StudentRemovalSection
+          onSearch={onSearchStudentsToRemove}
+          onRemove={onRemoveStudent}
+          isRemovingStudentId={removingStudentId}
+        />
       </Card>
 
       <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
