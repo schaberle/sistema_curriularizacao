@@ -31,6 +31,37 @@ const officialRegistry_utils_1 = require("../services/registry/officialRegistry.
 export function createOrganizerRoutes(database, authService, officialRegistryService) {
     const router = (0, express_1.Router)();
     const authMiddleware = (0, auth_middleware_1.createAuthMiddleware)(authService);
+    const formatErrorForLog = (error) => {
+        if (error instanceof Error) {
+            return {
+                name: error.name,
+                message: error.message,
+                stack: error.stack || null,
+            };
+        }
+        if (error && typeof error === 'object') {
+            let raw = null;
+            try {
+                raw = JSON.stringify(error);
+            }
+            catch (_a) {
+                raw = '[unserializable_error_object]';
+            }
+            const source = error;
+            return {
+                name: typeof source.name === 'string' ? source.name : null,
+                message: typeof source.message === 'string' ? source.message : null,
+                code: source.code || null,
+                details: source.details || null,
+                hint: source.hint || null,
+                status: source.status || null,
+                raw,
+            };
+        }
+        return {
+            message: String(error),
+        };
+    };
     const PHASE1_COMPLETED_STATUSES = new Set([
         'COMPLETED',
         'PARTIAL',
@@ -375,9 +406,10 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
                         event: 'official_registry_sync_failed_on_distribution_create',
                         distributionId,
                         organizerId,
+                        requestId: req?.requestId || null,
                         method: req.method,
                         path: req.originalUrl,
-                        error: syncError instanceof Error ? syncError.message : String(syncError),
+                        error: formatErrorForLog(syncError),
                         timestamp: new Date().toISOString(),
                     }));
                 }
@@ -393,9 +425,11 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
             console.error(JSON.stringify({
                 level: 'error',
                 event: 'create_distribution_failed',
+                organizerId: req?.user?.organizerId || null,
+                requestId: req?.requestId || null,
                 method: req.method,
                 path: req.originalUrl,
-                error: error instanceof Error ? error.message : String(error),
+                error: formatErrorForLog(error),
                 timestamp: new Date().toISOString(),
             }));
             res.status(500).json({
@@ -2034,5 +2068,4 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
     return router;
 }
 //# sourceMappingURL=organizer.routes.js.map
-
 
