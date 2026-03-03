@@ -366,7 +366,21 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
             // Criar distribuiÃ§Ã£o
             const distributionId = await database.createDistribution(organizerId);
             if (officialRegistryService?.syncDistribution) {
-                await officialRegistryService.syncDistribution(distributionId);
+                try {
+                    await officialRegistryService.syncDistribution(distributionId);
+                }
+                catch (syncError) {
+                    console.warn(JSON.stringify({
+                        level: 'warn',
+                        event: 'official_registry_sync_failed_on_distribution_create',
+                        distributionId,
+                        organizerId,
+                        method: req.method,
+                        path: req.originalUrl,
+                        error: syncError instanceof Error ? syncError.message : String(syncError),
+                        timestamp: new Date().toISOString(),
+                    }));
+                }
             }
             res.status(201).json({
                 success: true,
@@ -376,6 +390,14 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
             });
         }
         catch (error) {
+            console.error(JSON.stringify({
+                level: 'error',
+                event: 'create_distribution_failed',
+                method: req.method,
+                path: req.originalUrl,
+                error: error instanceof Error ? error.message : String(error),
+                timestamp: new Date().toISOString(),
+            }));
             res.status(500).json({
                 error: 'Erro ao criar distribuiÃ§Ã£o',
             });
@@ -2012,6 +2034,5 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
     return router;
 }
 //# sourceMappingURL=organizer.routes.js.map
-
 
 
