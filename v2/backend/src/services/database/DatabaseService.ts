@@ -84,6 +84,23 @@ export class DatabaseService {
   }
 
   /**
+   * Busca organizador por ID
+   */
+  async getOrganizerById(organizerId: string): Promise<any | null> {
+    const { data, error } = await this.client
+      .from('organizers')
+      .select('id, email')
+      .eq('id', organizerId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+
+    return data || null;
+  }
+
+  /**
    * Verifica password do organizador
    */
   async verifyOrganizerPassword(organizerId: string, passwordHash: string): Promise<boolean> {

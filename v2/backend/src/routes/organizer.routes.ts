@@ -392,8 +392,15 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
      * Response 500: Erro interno
      */
     router.post('/distributions', authMiddleware, (0, error_middleware_1.asyncHandler)(async (req, res) => {
+        let organizerId = null;
         try {
-            const organizerId = (0, auth_middleware_1.getOrganizerIdFromRequest)(req);
+            organizerId = (0, auth_middleware_1.getOrganizerIdFromRequest)(req);
+            const organizer = await database.getOrganizerById(organizerId);
+            if (!organizer) {
+                return res.status(403).json({
+                    error: 'Organizador nao encontrado na base. Reautentique e tente novamente.',
+                });
+            }
             // Criar distribuiÃ§Ã£o
             const distributionId = await database.createDistribution(organizerId);
             if (officialRegistryService?.syncDistribution) {
@@ -425,7 +432,7 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
             console.error(JSON.stringify({
                 level: 'error',
                 event: 'create_distribution_failed',
-                organizerId: req?.user?.organizerId || null,
+                organizerId,
                 requestId: req?.requestId || null,
                 method: req.method,
                 path: req.originalUrl,
@@ -2068,4 +2075,3 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
     return router;
 }
 //# sourceMappingURL=organizer.routes.js.map
-
