@@ -46,6 +46,11 @@ export interface Statistics {
     mechanical: number;
   };
   phaseBreakdown: Record<number, number>; // { 1: 15, 2: 20, ... }
+  studentPreferenceStatuses: {
+    id: string;
+    name: string;
+    hasSubmittedPreferences: boolean;
+  }[];
   warnings: string[];
   lastUpdated: string;
 }

@@ -1,7 +1,11 @@
 import { Request, Response, Router } from 'express';
 import { sendPublicError } from '../middleware/publicError.middleware';
 import { AuthService } from '../services/auth/AuthService';
-import { StudentSessionService } from '../services/auth/StudentSessionService';
+import {
+  StudentSessionError,
+  StudentSessionFailureReason,
+  StudentSessionService,
+} from '../services/auth/StudentSessionService';
 import { asyncHandler } from '../middleware/error.middleware';
 import { getRequestIp, getRequestUserAgent } from '../middleware/security.middleware';
 
@@ -15,6 +19,13 @@ export function createAuthRoutes(
   studentSessionService: StudentSessionService
 ): Router {
   const router = Router();
+
+  function mapRefreshFailureReason(error: unknown): StudentSessionFailureReason | 'unknown' {
+    if (error instanceof StudentSessionError) {
+      return error.reason;
+    }
+    return 'unknown';
+  }
 
   /**
    * GET /api/auth/verify
@@ -55,6 +66,7 @@ export function createAuthRoutes(
   router.post(
     '/refresh',
     asyncHandler(async (req: Request, res: Response) => {
+      const requestId = String((req as any).requestId || 'unknown');
       try {
         const refreshToken = req.cookies?.[studentSessionService.refreshCookieName] || '';
         const csrfCookieToken = req.cookies?.[studentSessionService.csrfCookieName] || '';
@@ -86,12 +98,27 @@ export function createAuthRoutes(
             distributionId: claims.distribution_id,
           },
         });
-      } catch {
+      } catch (error) {
+        const reason = mapRefreshFailureReason(error);
+        console.warn(
+          JSON.stringify({
+            level: 'warn',
+            event: 'auth_refresh_failed',
+            requestId,
+            reason,
+            ipAddress: getRequestIp(req),
+            userAgent: getRequestUserAgent(req),
+            timestamp: new Date().toISOString(),
+          })
+        );
         studentSessionService.clearSessionCookies(res);
         return sendPublicError(req, res, {
           status: 401,
           errorCode: 'AUTH_INVALID',
           message: 'Nao foi possivel renovar a sessao',
+          details: {
+            reason,
+          },
         });
       }
     })
@@ -106,16 +133,13 @@ export function createAuthRoutes(
     asyncHandler(async (req: Request, res: Response) => {
       const csrfCookieToken = req.cookies?.[studentSessionService.csrfCookieName] || '';
       const csrfHeaderToken = String(req.headers['x-csrf-token'] || '');
-      if (!csrfCookieToken || !csrfHeaderToken || csrfCookieToken !== csrfHeaderToken) {
-        return sendPublicError(req, res, {
-          status: 403,
-          errorCode: 'VALIDATION_FAILED',
-          message: 'CSRF token invalido',
-        });
-      }
-
       const refreshToken = req.cookies?.[studentSessionService.refreshCookieName] || '';
-      if (refreshToken) {
+      const csrfMatches =
+        Boolean(csrfCookieToken) &&
+        Boolean(csrfHeaderToken) &&
+        csrfCookieToken === csrfHeaderToken;
+
+      if (refreshToken && csrfMatches) {
         try {
           await studentSessionService.revokeSession(refreshToken);
         } catch {
@@ -124,10 +148,7 @@ export function createAuthRoutes(
       }
 
       studentSessionService.clearSessionCookies(res);
-
-      return res.status(200).json({
-        success: true,
-      });
+      return res.status(204).send();
     })
   );
 

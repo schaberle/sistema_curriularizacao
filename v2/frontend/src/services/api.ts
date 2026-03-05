@@ -1,5 +1,6 @@
-﻿import axios, { AxiosError, AxiosInstance } from 'axios';
+import axios, { AxiosError, AxiosInstance } from 'axios';
 import { supabase } from './supabase';
+import { StudentAuthRecovery, StudentReauthRequiredError } from './studentAuthRecovery';
 import type {
   Distribution,
   ExecutionReport,
@@ -27,12 +28,12 @@ import type {
 } from '../types/distribution.types';
 
 /**
- * API Client - Cliente HTTP para comunicaÃ§Ã£o com backend
+ * API Client - Cliente HTTP para comunicação com backend
  *
  * Responsabilidades:
  * 1. Configurar cliente Axios
  * 2. Adicionar interceptadores (auth, erro)
- * 3. Fornecer mÃ©todos tipados para cada rota
+ * 3. Fornecer métodos tipados para cada rota
  */
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4300';
@@ -191,6 +192,13 @@ function normalizeStatistics(raw: any, distributionId: string): Statistics {
   const totalStudents = raw?.totalStudents ?? 0;
   const studentsWithPreferences = raw?.studentsWithPreferences ?? 0;
   const studentsWithAffinities = raw?.studentsWithAffinities ?? 0;
+  const studentPreferenceStatuses = Array.isArray(raw?.studentPreferenceStatuses)
+    ? raw.studentPreferenceStatuses.map((item: any) => ({
+        id: String(item?.id ?? ''),
+        name: String(item?.name ?? 'Aluno sem nome'),
+        hasSubmittedPreferences: Boolean(item?.hasSubmittedPreferences),
+      }))
+    : [];
 
   return {
     distributionId: raw?.distributionId ?? distributionId,
@@ -205,6 +213,7 @@ function normalizeStatistics(raw: any, distributionId: string): Statistics {
       (totalStudents > 0 ? (studentsWithAffinities / totalStudents) * 100 : 0),
     courseBreakdown: normalizeCourseBreakdown(raw?.courseBreakdown),
     phaseBreakdown: normalizePhaseBreakdown(raw?.phaseBreakdown),
+    studentPreferenceStatuses,
     warnings: raw?.warnings ?? [],
     lastUpdated: raw?.lastUpdated ?? new Date().toISOString(),
   };
@@ -511,7 +520,30 @@ function normalizeSimulationRunCompleted(raw: any): SimulationRunCompleted {
 
 class APIClient {
   private client: AxiosInstance;
+  private studentAuthRecovery: StudentAuthRecovery;
+  private studentReauthEventSent = false;
   constructor() {
+    this.studentAuthRecovery = new StudentAuthRecovery({
+      runRefresh: () => this.refreshStudentSessionInternal(),
+      clearLocalSession: async () => {
+        setStudentSessionState(null);
+      },
+      onReauthRequired: (reason: string) => {
+        if (typeof window === 'undefined' || this.studentReauthEventSent) {
+          return;
+        }
+
+        this.studentReauthEventSent = true;
+        window.dispatchEvent(
+          new CustomEvent('student:reauth-required', {
+            detail: {
+              reason,
+            },
+          })
+        );
+      },
+    });
+
     this.client = axios.create({
       baseURL: API_URL,
       withCredentials: true,
@@ -525,6 +557,10 @@ class APIClient {
       const isStudentRequest = Boolean((config as any)?.meta?.studentAuth);
 
       if (isStudentRequest) {
+        if (this.studentAuthRecovery.shouldBlockRequest(config.url)) {
+          throw new StudentReauthRequiredError();
+        }
+
         let studentSession = loadStudentSessionState();
         if (!studentSession) {
           await this.refreshStudentSession();
@@ -555,6 +591,10 @@ class APIClient {
         const isStudentRequest = Boolean(originalRequest?.meta?.studentAuth);
 
         if (status === 401 && isStudentRequest && originalRequest && !originalRequest._studentRetry) {
+          if (this.studentAuthRecovery.isTerminated()) {
+            return Promise.reject(new StudentReauthRequiredError());
+          }
+
           originalRequest._studentRetry = true;
           const refreshed = await this.refreshStudentSession();
           if (refreshed) {
@@ -584,7 +624,8 @@ class APIClient {
 
         if (status === 401) {
           if (isStudentRequest) {
-            await this.logoutStudent();
+            await this.studentAuthRecovery.terminate('unauthorized');
+            return Promise.reject(new StudentReauthRequiredError());
           } else {
             const { data } = await supabase.auth.getSession();
             if (!data.session) {
@@ -630,6 +671,9 @@ class APIClient {
     });
   }
   private async refreshStudentSession(): Promise<boolean> {
+    return this.studentAuthRecovery.refreshSingleFlight();
+  }
+  private async refreshStudentSessionInternal(): Promise<boolean> {
     try {
       const response = await axios.post(
         `${API_URL}/api/auth/refresh`,
@@ -659,7 +703,6 @@ class APIClient {
       });
       return true;
     } catch {
-      setStudentSessionState(null);
       return false;
     }
   }
@@ -1095,13 +1138,13 @@ const api = new APIClient();
 
 export async function listDistributions(): Promise<Distribution[]> {
   const response = (await api.listDistributions()) as LegacyResponse<{ distributions: any[] }>;
-  const data = ensureSuccess(response, 'Falha ao listar distribuiÃ§Ãµes');
+  const data = ensureSuccess(response, 'Falha ao listar distribuições');
   return (data.distributions ?? []).map(normalizeDistribution);
 }
 
 export async function createDistribution(): Promise<string> {
   const response = (await api.createDistribution()) as LegacyResponse<{ distributionId: string }>;
-  const data = ensureSuccess(response, 'Falha ao criar distribuiÃ§Ã£o');
+  const data = ensureSuccess(response, 'Falha ao criar distribuição');
   return data.distributionId;
 }
 
@@ -1135,7 +1178,7 @@ export async function getDistribution(distributionId: string): Promise<{
       ? normalizeStatistics(
           ensureSuccess(
             statisticsResult.value as LegacyResponse<any>,
-            'Falha ao carregar estatÃ­sticas'
+            'Falha ao carregar estatísticas'
           ),
           distributionId
         )
@@ -1170,7 +1213,7 @@ export async function uploadThemes(distributionId: string, themes: Theme[]): Pro
 
 export async function getDistributionStatistics(distributionId: string): Promise<Statistics> {
   const response = (await api.getDistributionStatistics(distributionId)) as LegacyResponse<any>;
-  const data = ensureSuccess(response, 'Falha ao carregar estatÃ­sticas');
+  const data = ensureSuccess(response, 'Falha ao carregar estatísticas');
   return normalizeStatistics(data, distributionId);
 }
 
@@ -1421,3 +1464,4 @@ export async function getSimulationRunResult(runId: string): Promise<{
 }
 
 export default api;
+

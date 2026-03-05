@@ -1861,6 +1861,11 @@ export class DatabaseService {
     preferenceCompletionRate: number;
     affinityCompletionRate: number;
     phase1Executed: boolean;
+    studentPreferenceStatuses: {
+      id: string;
+      name: string;
+      hasSubmittedPreferences: boolean;
+    }[];
   }> {
     // 1. Registro oficial ativo define o total esperado de alunos.
     const { data: registryRows, error: registryError } = await this.client
@@ -1911,7 +1916,7 @@ export class DatabaseService {
     // 2. Alunos operacionais representam quem de fato respondeu no fluxo.
     const { data: students, error: studentsError } = await this.client
       .from('students')
-      .select('id, course, phase')
+      .select('id, name, course, phase')
       .eq('distribution_id', distributionId);
 
     if (studentsError) {
@@ -1948,6 +1953,11 @@ export class DatabaseService {
     const studentIds = (students || []).map((s: any) => s.id);
     let studentsWithPreferences = 0;
     let studentsWithAffinities = 0;
+    let studentPreferenceStatuses: {
+      id: string;
+      name: string;
+      hasSubmittedPreferences: boolean;
+    }[] = [];
 
     if (studentIds.length > 0) {
       const { data: preferencesData, error: prefsError } = await this.client
@@ -1961,6 +1971,13 @@ export class DatabaseService {
 
       const studentsWithPrefsSet = new Set(preferencesData?.map((p: any) => p.student_id) || []);
       studentsWithPreferences = studentsWithPrefsSet.size;
+      studentPreferenceStatuses = (students || [])
+        .map((student: any) => ({
+          id: String(student.id),
+          name: String(student.name || 'Aluno sem nome'),
+          hasSubmittedPreferences: studentsWithPrefsSet.has(student.id),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 
       const { data: affinitiesData, error: affError } = await this.client
         .from('student_affinities')
@@ -2002,6 +2019,7 @@ export class DatabaseService {
       preferenceCompletionRate,
       affinityCompletionRate,
       phase1Executed,
+      studentPreferenceStatuses,
     };
   }
   async getDistributionGroups(distributionId: string): Promise<any[]> {

@@ -13,6 +13,25 @@ type SessionContext = {
   userAgent: string;
 };
 
+export type StudentSessionFailureReason =
+  | 'missing_refresh_cookie'
+  | 'csrf_missing'
+  | 'csrf_invalid'
+  | 'invalid_signature'
+  | 'expired'
+  | 'revoked'
+  | 'reuse_detected';
+
+export class StudentSessionError extends Error {
+  readonly reason: StudentSessionFailureReason;
+
+  constructor(reason: StudentSessionFailureReason, message: string) {
+    super(message);
+    this.name = 'StudentSessionError';
+    this.reason = reason;
+  }
+}
+
 export type StudentAccessTokenClaims = JwtPayload & {
   sub: string;
   role: 'student';
@@ -124,42 +143,80 @@ export class StudentSessionService {
     return decoded;
   }
 
-  setSessionCookies(response: Response, tokens: { refreshToken: string; csrfToken: string }): void {
-    const secureCookie = process.env.NODE_ENV === 'production';
+  private resolveCookieSecure(): boolean {
+    const raw = String(process.env.STUDENT_COOKIE_SECURE || '').trim().toLowerCase();
+    if (raw === 'true') {
+      return true;
+    }
+    if (raw === 'false') {
+      return false;
+    }
+    return process.env.NODE_ENV === 'production';
+  }
+
+  private resolveCookieSameSite(): 'strict' | 'lax' | 'none' {
+    const raw = String(process.env.STUDENT_COOKIE_SAMESITE || '').trim().toLowerCase();
+    if (raw === 'strict' || raw === 'lax' || raw === 'none') {
+      return raw;
+    }
+    return 'lax';
+  }
+
+  private buildCookieOptions(httpOnly: boolean, path: string): {
+    httpOnly: boolean;
+    secure: boolean;
+    sameSite: 'strict' | 'lax' | 'none';
+    maxAge: number;
+    path: string;
+    domain?: string;
+  } {
     const maxAgeMs = this.refreshTtlSec * 1000;
+    const sameSite = this.resolveCookieSameSite();
+    const secure = sameSite === 'none' ? true : this.resolveCookieSecure();
+    const domain = String(process.env.STUDENT_COOKIE_DOMAIN || '').trim();
 
-    response.cookie(this.refreshCookieName, tokens.refreshToken, {
-      httpOnly: true,
-      secure: secureCookie,
-      sameSite: 'strict',
+    return {
+      httpOnly,
+      secure,
+      sameSite,
       maxAge: maxAgeMs,
-      path: '/api/auth',
-    });
+      path,
+      ...(domain ? { domain } : {}),
+    };
+  }
 
-    response.cookie(this.csrfCookieName, tokens.csrfToken, {
-      httpOnly: false,
-      secure: secureCookie,
-      sameSite: 'strict',
-      maxAge: maxAgeMs,
-      path: '/',
-    });
+  setSessionCookies(response: Response, tokens: { refreshToken: string; csrfToken: string }): void {
+    response.cookie(
+      this.refreshCookieName,
+      tokens.refreshToken,
+      this.buildCookieOptions(true, '/api/auth')
+    );
+
+    response.cookie(
+      this.csrfCookieName,
+      tokens.csrfToken,
+      this.buildCookieOptions(false, '/')
+    );
   }
 
   clearSessionCookies(response: Response): void {
-    const secureCookie = process.env.NODE_ENV === 'production';
+    const refreshCookieOptions = this.buildCookieOptions(true, '/api/auth');
+    const csrfCookieOptions = this.buildCookieOptions(false, '/');
 
     response.clearCookie(this.refreshCookieName, {
-      httpOnly: true,
-      secure: secureCookie,
-      sameSite: 'strict',
-      path: '/api/auth',
+      httpOnly: refreshCookieOptions.httpOnly,
+      secure: refreshCookieOptions.secure,
+      sameSite: refreshCookieOptions.sameSite,
+      path: refreshCookieOptions.path,
+      ...(refreshCookieOptions.domain ? { domain: refreshCookieOptions.domain } : {}),
     });
 
     response.clearCookie(this.csrfCookieName, {
-      httpOnly: false,
-      secure: secureCookie,
-      sameSite: 'strict',
-      path: '/',
+      httpOnly: csrfCookieOptions.httpOnly,
+      secure: csrfCookieOptions.secure,
+      sameSite: csrfCookieOptions.sameSite,
+      path: csrfCookieOptions.path,
+      ...(csrfCookieOptions.domain ? { domain: csrfCookieOptions.domain } : {}),
     });
   }
 
@@ -176,11 +233,11 @@ export class StudentSessionService {
 
   private validateCsrf(csrfHeaderToken: string, csrfCookieToken: string): void {
     if (!csrfHeaderToken || !csrfCookieToken) {
-      throw new Error('CSRF token ausente');
+      throw new StudentSessionError('csrf_missing', 'CSRF token ausente');
     }
 
     if (!this.secureEquals(csrfHeaderToken, csrfCookieToken)) {
-      throw new Error('CSRF token invalido');
+      throw new StudentSessionError('csrf_invalid', 'CSRF token invalido');
     }
   }
 
@@ -190,31 +247,35 @@ export class StudentSessionService {
     csrfCookieToken: string,
     context: SessionContext
   ): Promise<StudentSessionIssueResult> {
+    if (!refreshToken) {
+      throw new StudentSessionError('missing_refresh_cookie', 'Refresh token ausente');
+    }
+
     this.validateCsrf(csrfHeaderToken, csrfCookieToken);
 
     const refreshTokenHash = this.hash(refreshToken);
     const session = await this.databaseService.getStudentSessionByRefreshHash(refreshTokenHash);
 
     if (!session) {
-      throw new Error('Sessao invalida');
+      throw new StudentSessionError('invalid_signature', 'Sessao invalida');
     }
 
     const now = Date.now();
     const expiresAtMs = new Date(session.expires_at).getTime();
     if (!Number.isFinite(expiresAtMs) || expiresAtMs <= now) {
       await this.databaseService.revokeStudentSessionByRefreshHash(refreshTokenHash, 'expired');
-      throw new Error('Sessao expirada');
+      throw new StudentSessionError('expired', 'Sessao expirada');
     }
 
     if (session.revoked_at) {
       await this.databaseService.revokeStudentSessionsByStudent(session.student_id, 'refresh_token_replay');
-      throw new Error('Sessao revogada');
+      throw new StudentSessionError('reuse_detected', 'Sessao revogada');
     }
 
     const csrfHashFromHeader = this.hash(csrfHeaderToken);
     if (csrfHashFromHeader !== session.csrf_token_hash) {
       await this.databaseService.revokeStudentSessionByRefreshHash(refreshTokenHash, 'csrf_mismatch');
-      throw new Error('CSRF token invalido');
+      throw new StudentSessionError('csrf_invalid', 'CSRF token invalido');
     }
 
     const nextRefreshToken = this.randomToken();

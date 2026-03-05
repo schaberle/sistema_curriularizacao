@@ -37,6 +37,7 @@ export function DataCollectionView({
 }: DataCollectionViewProps) {
   const totalStudents = statistics?.totalStudents ?? 0;
   const studentsWithPreferences = statistics?.studentsWithPreferences ?? 0;
+  const studentPreferenceStatuses = statistics?.studentPreferenceStatuses ?? [];
   const canProceed = totalStudents > 0;
 
   return (
@@ -55,6 +56,7 @@ export function DataCollectionView({
               distributionLink={distributionLink}
               totalStudents={totalStudents}
               studentsWithPreferences={studentsWithPreferences}
+              studentPreferenceStatuses={studentPreferenceStatuses}
             />
           </Card>
 

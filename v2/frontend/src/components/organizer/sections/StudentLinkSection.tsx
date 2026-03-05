@@ -3,27 +3,42 @@
  * Displays shareable link for students to join the distribution
  */
 
-import { useRef, useState } from 'react';
-import { CheckCircle, Copy, Share2 } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
+import { CheckCircle, ChevronDown, ChevronUp, Copy, Share2 } from 'lucide-react';
 import { Button } from '../../common/Button';
 
 interface StudentLinkSectionProps {
   distributionLink: string;
   totalStudents?: number;
   studentsWithPreferences?: number;
+  studentPreferenceStatuses?: {
+    id: string;
+    name: string;
+    hasSubmittedPreferences: boolean;
+  }[];
 }
 
 export function StudentLinkSection({
   distributionLink,
   totalStudents = 0,
   studentsWithPreferences = 0,
+  studentPreferenceStatuses = [],
 }: StudentLinkSectionProps) {
   const [copied, setCopied] = useState(false);
   const [copyHelp, setCopyHelp] = useState<string | null>(null);
+  const [isStatusListOpen, setIsStatusListOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const completionPercentage =
     totalStudents > 0 ? Math.round((studentsWithPreferences / totalStudents) * 100) : 0;
+  const submittedStudents = useMemo(
+    () => studentPreferenceStatuses.filter((student) => student.hasSubmittedPreferences),
+    [studentPreferenceStatuses]
+  );
+  const missingStudents = useMemo(
+    () => studentPreferenceStatuses.filter((student) => !student.hasSubmittedPreferences),
+    [studentPreferenceStatuses]
+  );
 
   const handleCopy = async () => {
     setCopyHelp(null);
@@ -56,7 +71,57 @@ export function StudentLinkSection({
           <div className="h-2 rounded-full bg-[var(--brand-600)] transition-all" style={{ width: `${completionPercentage}%` }} />
         </div>
         <p className="mt-2 text-xs text-slate-600">{completionPercentage}% com preferencias preenchidas</p>
+        {studentPreferenceStatuses.length > 0 && (
+          <button
+            type="button"
+            className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-[var(--brand-700)] hover:text-[var(--brand-800)]"
+            onClick={() => setIsStatusListOpen((prev) => !prev)}
+          >
+            {isStatusListOpen ? 'Ocultar lista de alunos' : 'Ver lista de quem preencheu e quem falta'}
+            {isStatusListOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </button>
+        )}
       </div>
+
+      {isStatusListOpen && (
+        <div className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+              Preencheram ({submittedStudents.length})
+            </p>
+            <ul className="max-h-56 space-y-2 overflow-auto pr-1">
+              {submittedStudents.length === 0 && (
+                <li className="rounded-lg border border-slate-200 bg-white p-2 text-xs text-slate-500">
+                  Nenhum aluno concluiu ainda.
+                </li>
+              )}
+              {submittedStudents.map((student) => (
+                <li key={student.id} className="rounded-lg border border-emerald-200 bg-white p-2 text-sm text-slate-900">
+                  {student.name}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+              Faltam ({missingStudents.length})
+            </p>
+            <ul className="max-h-56 space-y-2 overflow-auto pr-1">
+              {missingStudents.length === 0 && (
+                <li className="rounded-lg border border-slate-200 bg-white p-2 text-xs text-slate-500">
+                  Todos os alunos preencheram.
+                </li>
+              )}
+              {missingStudents.map((student) => (
+                <li key={student.id} className="rounded-lg border border-amber-200 bg-white p-2 text-sm text-slate-900">
+                  {student.name}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-2">
         <label htmlFor="distributionLink" className="block text-sm font-medium text-slate-700">
