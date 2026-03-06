@@ -589,6 +589,7 @@ class APIClient {
         const status = error.response?.status;
         const originalRequest = error.config as any;
         const isStudentRequest = Boolean(originalRequest?.meta?.studentAuth);
+        const isStudentSessionBootstrap = Boolean(originalRequest?.meta?.studentSessionBootstrap);
 
         if (status === 401 && isStudentRequest && originalRequest && !originalRequest._studentRetry) {
           if (this.studentAuthRecovery.isTerminated()) {
@@ -607,7 +608,13 @@ class APIClient {
           }
         }
 
-        if (status === 401 && !isStudentRequest && originalRequest && !originalRequest._retry) {
+        if (
+          status === 401 &&
+          !isStudentRequest &&
+          !isStudentSessionBootstrap &&
+          originalRequest &&
+          !originalRequest._retry
+        ) {
           originalRequest._retry = true;
           try {
             const { data, error: refreshError } = await supabase.auth.refreshSession();
@@ -627,20 +634,26 @@ class APIClient {
             await this.studentAuthRecovery.terminate('unauthorized');
             return Promise.reject(new StudentReauthRequiredError());
           } else {
-            const { data } = await supabase.auth.getSession();
-            if (!data.session) {
-              const nextPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-              window.location.assign(`/login?next=${encodeURIComponent(nextPath)}`);
+            if (!isStudentSessionBootstrap) {
+              const { data } = await supabase.auth.getSession();
+              if (!data.session) {
+                const nextPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+                window.location.assign(`/login?next=${encodeURIComponent(nextPath)}`);
+              }
             }
           }
         }
 
         const payload: any = error.response?.data || {};
-        const message =
+        let message =
           payload?.message ||
           payload?.error ||
           error.message ||
           'Erro inesperado na comunicacao com o servidor';
+
+        if (status === 401 && isStudentSessionBootstrap) {
+          message = 'RA nao encontrado para esta distribuicao.';
+        }
 
         return Promise.reject(new Error(message));
       }
@@ -752,7 +765,16 @@ class APIClient {
     distributionId: string,
     data: { matricula: string }
   ) {
-    const response = await this.client.post(`/api/students/${distributionId}/session`, data);
+    const response = await this.client.post(
+      `/api/students/${distributionId}/session`,
+      data,
+      {
+        withCredentials: true,
+        meta: {
+          studentSessionBootstrap: true,
+        },
+      } as any
+    );
     const payload = response.data?.data;
 
     if (payload?.accessToken && payload?.studentId && payload?.distributionId) {

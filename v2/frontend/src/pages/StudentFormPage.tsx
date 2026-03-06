@@ -56,7 +56,7 @@ export function StudentFormPage() {
 
       setError('A etapa de preferencias esta fechada no momento para esta distribuicao.');
     } catch (err: any) {
-      setError(err.response?.data?.error || err.response?.data?.message || 'Erro ao iniciar sessao');
+      setError(err?.message || err.response?.data?.error || err.response?.data?.message || 'Erro ao iniciar sessao');
     } finally {
       setLoading(false);
     }
