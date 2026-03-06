@@ -21,6 +21,7 @@ import type {
   Statistics,
   Theme,
   OrganizerStudentSearchCandidate,
+  OrganizerManualStudentMoveResult,
   OrganizerStudentRemovalResult,
   VisualAffinityEdge,
   VisualGroupPartition,
@@ -243,6 +244,21 @@ function normalizeGroups(rawGroups: any[] = [], distributionId: string): Group[]
     createdAt: group.createdAt ?? group.created_at ?? new Date().toISOString(),
     updatedAt: group.updatedAt ?? group.updated_at ?? group.createdAt ?? new Date().toISOString(),
   }));
+}
+
+function normalizeManualStudentMoveResult(raw: any, distributionId: string): OrganizerManualStudentMoveResult {
+  return {
+    distributionId: String(raw?.distributionId ?? distributionId),
+    movedStudentId: String(raw?.movedStudentId ?? ''),
+    sourceGroupId: String(raw?.sourceGroupId ?? ''),
+    targetGroupId: String(raw?.targetGroupId ?? ''),
+    totalEnergyPhase1: Number(raw?.totals?.totalEnergyPhase1 ?? 0),
+    totalEnergyPhase2:
+      raw?.totals?.totalEnergyPhase2 !== undefined
+        ? Number(raw.totals.totalEnergyPhase2)
+        : undefined,
+    groups: normalizeGroups(raw?.groups ?? [], distributionId),
+  };
 }
 
 function normalizeExecutionReport(
@@ -1105,6 +1121,17 @@ class APIClient {
     return response.data;
   }
 
+  async moveDistributionStudent(
+    distributionId: string,
+    payload: { studentId: string; targetGroupId: string }
+  ) {
+    const response = await this.client.post(
+      `/api/organizer/distributions/${distributionId}/manual-move-student`,
+      payload
+    );
+    return response.data;
+  }
+
   async markExecutionPending(distributionId: string, scope: 'phase1' | 'phase2') {
     const response = await this.client.post(
       `/api/organizer/distributions/${distributionId}/execution-pending`,
@@ -1270,6 +1297,16 @@ export async function removeOrganizerStudent(
     phase1NeedsRerun: Boolean(data.phase1NeedsRerun),
     phase2NeedsRerun: Boolean(data.phase2NeedsRerun),
   };
+}
+
+export async function moveOrganizerStudent(
+  distributionId: string,
+  studentId: string,
+  targetGroupId: string
+): Promise<OrganizerManualStudentMoveResult> {
+  const response = (await api.moveDistributionStudent(distributionId, { studentId, targetGroupId })) as LegacyResponse<any>;
+  const data = ensureSuccess(response, 'Falha ao mover aluno entre grupos');
+  return normalizeManualStudentMoveResult(data, distributionId);
 }
 
 export async function executePhase1(

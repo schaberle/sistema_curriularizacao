@@ -373,6 +373,117 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
             });
         }
     }));
+    router.post('/distributions/:distributionId/manual-move-student', authMiddleware, (0, error_middleware_1.asyncHandler)(async (req, res) => {
+        try {
+            const organizerId = (0, auth_middleware_1.getOrganizerIdFromRequest)(req);
+            const distributionId = req.params.distributionId;
+            const studentId = String(req.body?.studentId || '').trim();
+            const targetGroupId = String(req.body?.targetGroupId || '').trim();
+            if (!studentId || !targetGroupId) {
+                return res.status(400).json({
+                    error: 'Informe studentId e targetGroupId.',
+                });
+            }
+            const distribution = await database.getDistribution(distributionId);
+            if (!distribution) {
+                return res.status(404).json({
+                    error: 'Distribuicao nao encontrada',
+                });
+            }
+            if (distribution.organizer_id !== organizerId) {
+                return res.status(403).json({
+                    error: 'Voce nao tem permissao para acessar esta distribuicao',
+                });
+            }
+            const sourceGroup = await database.getStudentGroup(studentId, distributionId);
+            if (!sourceGroup) {
+                return res.status(404).json({
+                    error: 'Aluno nao esta alocado em nenhum grupo desta distribuicao.',
+                });
+            }
+            if (String(sourceGroup.id) === targetGroupId) {
+                return res.status(400).json({
+                    error: 'O grupo de destino deve ser diferente do grupo atual.',
+                });
+            }
+            const targetGroup = await database.getGroup(targetGroupId);
+            if (!targetGroup || String(targetGroup.distribution_id) !== distributionId) {
+                return res.status(404).json({
+                    error: 'Grupo de destino nao encontrado nesta distribuicao.',
+                });
+            }
+            const sourceGroupMembers = await database.getGroupStudents(String(sourceGroup.id));
+            const targetGroupMembers = await database.getGroupStudents(targetGroupId);
+            if (!sourceGroupMembers.includes(studentId)) {
+                return res.status(400).json({
+                    error: 'Aluno nao encontrado no grupo de origem.',
+                });
+            }
+            if (targetGroupMembers.includes(studentId)) {
+                return res.status(400).json({
+                    error: 'Aluno ja pertence ao grupo de destino.',
+                });
+            }
+            if (sourceGroupMembers.length <= 3) {
+                return res.status(400).json({
+                    error: 'Nao e possivel mover: grupo de origem ficaria com menos de 3 alunos.',
+                });
+            }
+            if (targetGroupMembers.length >= 5) {
+                return res.status(400).json({
+                    error: 'Nao e possivel mover: grupo de destino ja possui 5 alunos.',
+                });
+            }
+            await database.removeStudentFromGroup(String(sourceGroup.id), studentId);
+            await database.addStudentToGroup(targetGroupId, studentId);
+            const studentsBuild = await buildStudentsWithPreferences(distributionId);
+            const themesData = await database.getThemesByDistribution(distributionId);
+            const themes = buildThemes(distributionId, themesData || []);
+            const affinityMatrix = await buildAffinityMatrix(distributionId);
+            const solutionData = await buildSolutionFromDatabase(distributionId, studentsBuild.studentsMap);
+            const status = normalizeDistributionStatus(distribution.status);
+            const includePhase2Energy = status === 'PHASE2_COMPLETED';
+            const executionMeta = simulationExecutionMetaByDistribution.get(distributionId)?.phase2 || {
+                swapsAccepted: 0,
+                stabilityPercent: 100,
+            };
+            const metrics = await buildSimulationMetricsPayload(distributionId, themes, solutionData.solution.groups, {
+                includePhase2Energy,
+                executionMeta,
+            });
+            res.status(200).json({
+                success: true,
+                data: {
+                    distributionId,
+                    movedStudentId: studentId,
+                    sourceGroupId: String(sourceGroup.id),
+                    targetGroupId,
+                    totals: metrics.totals,
+                    groups: metrics.groups.map((group) => ({
+                        id: group.id,
+                        theme: {
+                            id: group.themeId,
+                            name: group.themeName,
+                        },
+                        members: group.members.map((member) => ({
+                            id: member.id,
+                            name: member.name,
+                            course: member.course,
+                            phase: member.phase,
+                        })),
+                        energy: group.energyPhase1,
+                        socialCohesionScore: group.socialCohesionScore,
+                    })),
+                },
+            });
+        }
+        catch (error) {
+            console.error('[manual-move-student] Error:', error);
+            res.status(500).json({
+                error: 'Erro ao mover aluno manualmente',
+            });
+        }
+    }));
     /**
      * POST /api/organizer/distributions
      * Cria nova distribuiÃ§Ã£o

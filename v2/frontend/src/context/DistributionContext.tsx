@@ -18,6 +18,7 @@ import {
   seedDistribution as seedDistributionApi,
   seedAffinities as seedAffinitiesApi,
   markExecutionPending as markExecutionPendingApi,
+  moveOrganizerStudent as moveOrganizerStudentApi,
 } from '../services/api';
 import {
   Distribution,
@@ -56,6 +57,7 @@ const initialState: DistributionContextState = {
     generateSeed: false,
     generateAffinities: false,
     markExecutionPending: false,
+    moveStudent: false,
   },
   errors: {
     fetchDistributions: null,
@@ -71,6 +73,7 @@ const initialState: DistributionContextState = {
     generateSeed: null,
     generateAffinities: null,
     markExecutionPending: null,
+    moveStudent: null,
   },
 };
 
@@ -512,6 +515,42 @@ export function DistributionProvider({ children }: DistributionProviderProps) {
     [setLoading, setError, updateDistributionMetadata, syncDistributionMetadata]
   );
 
+  const moveStudent = useCallback(
+    async (distributionId: string, studentId: string, targetGroupId: string) => {
+      setLoading('moveStudent', true);
+      setError('moveStudent', null);
+
+      try {
+        const moveResult = await moveOrganizerStudentApi(distributionId, studentId, targetGroupId);
+
+        setState((prev) => ({
+          ...prev,
+          groups: moveResult.groups,
+          phase1Report: prev.phase1Report
+            ? { ...prev.phase1Report, totalEnergy: moveResult.totalEnergyPhase1 }
+            : prev.phase1Report,
+          phase2Report:
+            prev.phase2Report && moveResult.totalEnergyPhase2 !== undefined
+              ? { ...prev.phase2Report, totalEnergy: moveResult.totalEnergyPhase2 }
+              : prev.phase2Report,
+        }));
+
+        if (moveResult.totalEnergyPhase2 !== undefined) {
+          await fetchSocialMetrics(distributionId).catch(() => null);
+        }
+
+        return moveResult;
+      } catch (error: any) {
+        const errorMessage = error?.message || 'Erro ao mover aluno';
+        setError('moveStudent', errorMessage);
+        throw error;
+      } finally {
+        setLoading('moveStudent', false);
+      }
+    },
+    [fetchSocialMetrics, setError, setLoading]
+  );
+
   // Configuration
   const setPhase1Config = useCallback((config: Partial<Phase1Config>) => {
     setState((prev) => ({
@@ -566,6 +605,7 @@ export function DistributionProvider({ children }: DistributionProviderProps) {
       generateSeed,
       generateAffinities,
       markExecutionPending,
+      moveStudent,
       setPhase1Config,
       setPhase2Config,
       setPhase2Enabled,
@@ -588,6 +628,7 @@ export function DistributionProvider({ children }: DistributionProviderProps) {
       generateSeed,
       generateAffinities,
       markExecutionPending,
+      moveStudent,
       setPhase1Config,
       setPhase2Config,
       setPhase2Enabled,

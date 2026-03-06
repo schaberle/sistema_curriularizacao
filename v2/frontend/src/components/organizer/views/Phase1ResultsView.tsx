@@ -4,6 +4,7 @@
 
 import { ArrowLeft, LayoutPanelLeft, RefreshCw, Heart, Users } from 'lucide-react';
 import { Button } from '../../common/Button';
+import { ManualStudentMovePanel } from '../ManualStudentMovePanel';
 import { ExecutionReport, Group } from '../../../types/distribution.types';
 
 interface Phase1ResultsViewProps {
@@ -14,6 +15,8 @@ interface Phase1ResultsViewProps {
   onPhase2: () => void;
   onReexecute: () => void;
   onList: () => void;
+  onManualMove: (studentId: string, targetGroupId: string) => Promise<void> | void;
+  movingStudent?: boolean;
 }
 
 export function Phase1ResultsView({
@@ -24,6 +27,8 @@ export function Phase1ResultsView({
   onPhase2,
   onReexecute,
   onList,
+  onManualMove,
+  movingStudent = false,
 }: Phase1ResultsViewProps) {
   return (
     <div className="space-y-6 animate-fade-in">
@@ -58,6 +63,12 @@ export function Phase1ResultsView({
           </div>
         </div>
       )}
+
+      <ManualStudentMovePanel
+        groups={groups}
+        loading={movingStudent}
+        onMove={onManualMove}
+      />
 
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <header className="flex items-center justify-between border-b border-slate-100 px-5 py-4">

@@ -21,6 +21,17 @@ export function Step9_FinalResultsPage() {
   } = useDistribution();
   const { addToast } = useToast();
 
+  const handleManualMove = async (studentId: string, targetGroupId: string) => {
+    if (!distributionId) return;
+
+    try {
+      await actions.moveStudent(distributionId, studentId, targetGroupId);
+      addToast({ type: 'success', message: 'Aluno movido e metricas recalculadas.' });
+    } catch (error: any) {
+      addToast({ type: 'error', message: error?.message || 'Falha ao mover aluno.' });
+    }
+  };
+
   useEffect(() => {
     if (!distributionId) return;
 
@@ -85,6 +96,8 @@ export function Step9_FinalResultsPage() {
       groups={groups}
       socialMetrics={socialMetrics}
       loading={loading.fetchGroups || loading.fetchSocialMetrics || loading.loadDistribution}
+      movingStudent={loading.moveStudent}
+      onManualMove={handleManualMove}
       onBackPhase1={() => navigate(`/organizer/${distributionId}/step5-phase1-results`)}
       onReexecutePhase2={() => navigate(`/organizer/${distributionId}/step8-phase2-execute`)}
       onList={() => navigate(`/organizer/${distributionId}`)}

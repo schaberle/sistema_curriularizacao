@@ -1,5 +1,6 @@
 import { BarChart3, LayoutPanelLeft, RotateCcw, Users } from 'lucide-react';
 import { Button } from '../../common/Button';
+import { ManualStudentMovePanel } from '../ManualStudentMovePanel';
 import { ExecutionReport, Group, SocialMetrics } from '../../../types/distribution.types';
 
 interface FinalResultsViewProps {
@@ -11,6 +12,8 @@ interface FinalResultsViewProps {
   onList: () => void;
   onBackPhase1: () => void;
   onReexecutePhase2: () => void;
+  onManualMove: (studentId: string, targetGroupId: string) => Promise<void> | void;
+  movingStudent?: boolean;
 }
 
 export function FinalResultsView({
@@ -22,6 +25,8 @@ export function FinalResultsView({
   onList,
   onBackPhase1,
   onReexecutePhase2,
+  onManualMove,
+  movingStudent = false,
 }: FinalResultsViewProps) {
   return (
     <div className="space-y-6 animate-fade-in">
@@ -73,6 +78,12 @@ export function FinalResultsView({
           </div>
         </section>
       )}
+
+      <ManualStudentMovePanel
+        groups={groups}
+        loading={movingStudent}
+        onMove={onManualMove}
+      />
 
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <header className="flex items-center justify-between border-b border-slate-100 px-5 py-4">

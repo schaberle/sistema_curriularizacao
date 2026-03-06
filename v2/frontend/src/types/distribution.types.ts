@@ -71,6 +71,16 @@ export interface OrganizerStudentRemovalResult {
   phase2NeedsRerun: boolean;
 }
 
+export interface OrganizerManualStudentMoveResult {
+  distributionId: string;
+  movedStudentId: string;
+  sourceGroupId: string;
+  targetGroupId: string;
+  totalEnergyPhase1: number;
+  totalEnergyPhase2?: number;
+  groups: Group[];
+}
+
 export interface Phase1Config {
   wPref: number;    // Weight for preferences (default: 1.0)
   wDup: number;     // Weight for phase duplicates (default: 0.9)
@@ -357,6 +367,7 @@ export interface DistributionContextState {
     generateSeed: boolean;
     generateAffinities: boolean;
     markExecutionPending: boolean;
+    moveStudent: boolean;
   };
 
   errors: {
@@ -374,6 +385,7 @@ export interface DistributionContextState {
     generateSeed: string | null;
     generateAffinities: string | null;
     markExecutionPending: string | null;
+    moveStudent: string | null;
   };
 }
 
@@ -421,6 +433,11 @@ export interface DistributionContextActions {
   setPhase2Config: (config: Partial<Phase2Config>) => void;
   setPhase2Enabled: (enabled: boolean) => void;
   markExecutionPending: (distributionId: string, scope: 'phase1' | 'phase2') => Promise<void>;
+  moveStudent: (
+    distributionId: string,
+    studentId: string,
+    targetGroupId: string
+  ) => Promise<OrganizerManualStudentMoveResult>;
 
   // Error Management
   clearError: (operation: string) => void;
