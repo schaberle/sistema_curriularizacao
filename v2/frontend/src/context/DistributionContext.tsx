@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Distribution Context
  * Manages the state of the distribution wizard workflow
  */
@@ -88,6 +88,8 @@ interface DistributionProviderProps {
 export function DistributionProvider({ children }: DistributionProviderProps) {
   const [state, setState] = useState<DistributionContextState>(initialState);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const statisticsRequestSeqRef = useRef(0);
+  const statisticsInFlightRef = useRef(0);
 
   // Helper function to update loading state
   const setLoading = useCallback(
@@ -156,7 +158,7 @@ export function DistributionProvider({ children }: DistributionProviderProps) {
       }));
       return distributions;
     } catch (error: any) {
-      const errorMessage = error?.message || 'Erro ao buscar distribuições';
+      const errorMessage = error?.message || 'Erro ao buscar distribuiÃ§Ãµes';
       setError('fetchDistributions', errorMessage);
       throw error;
     } finally {
@@ -206,7 +208,7 @@ export function DistributionProvider({ children }: DistributionProviderProps) {
       }
       return distributionId;
     } catch (error: any) {
-      const errorMessage = error?.message || 'Erro ao criar distribuição';
+      const errorMessage = error?.message || 'Erro ao criar distribuiÃ§Ã£o';
       setError('createDistribution', errorMessage);
       throw error;
     } finally {
@@ -231,7 +233,7 @@ export function DistributionProvider({ children }: DistributionProviderProps) {
         phase2Report: null,
       }));
     } catch (error: any) {
-      const errorMessage = error?.message || 'Erro ao carregar distribuição';
+      const errorMessage = error?.message || 'Erro ao carregar distribuiÃ§Ã£o';
       setError('loadDistribution', errorMessage);
       throw error;
     } finally {
@@ -265,22 +267,29 @@ export function DistributionProvider({ children }: DistributionProviderProps) {
 
   // Statistics
   const fetchStatistics = useCallback(async (distributionId: string) => {
+    const requestSeq = ++statisticsRequestSeqRef.current;
+    statisticsInFlightRef.current += 1;
     setLoading('fetchStatistics', true);
     setError('fetchStatistics', null);
 
     try {
       const statistics = await getDistributionStatisticsApi(distributionId);
-      setState((prev) => ({
-        ...prev,
-        statistics,
-      }));
+      if (requestSeq === statisticsRequestSeqRef.current) {
+        setState((prev) => ({
+          ...prev,
+          statistics,
+        }));
+      }
       return statistics;
     } catch (error: any) {
-      const errorMessage = error?.message || 'Erro ao buscar estatísticas';
-      setError('fetchStatistics', errorMessage);
+      const errorMessage = error?.message || 'Erro ao buscar estatÃ­sticas';
+      if (requestSeq === statisticsRequestSeqRef.current) {
+        setError('fetchStatistics', errorMessage);
+      }
       throw error;
     } finally {
-      setLoading('fetchStatistics', false);
+      statisticsInFlightRef.current = Math.max(0, statisticsInFlightRef.current - 1);
+      setLoading('fetchStatistics', statisticsInFlightRef.current > 0);
     }
   }, [setError, setLoading]);
 
@@ -651,3 +660,4 @@ export function DistributionProvider({ children }: DistributionProviderProps) {
     </DistributionContext.Provider>
   );
 }
+

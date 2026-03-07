@@ -1082,7 +1082,14 @@ class APIClient {
 
   async getDistributionStatistics(distributionId: string) {
     const response = await this.client.get(
-      `/api/organizer/distributions/${distributionId}/statistics`
+      `/api/organizer/distributions/${distributionId}/statistics`,
+      {
+        params: { _t: Date.now() },
+        headers: {
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+      }
     );
     return response.data;
   }

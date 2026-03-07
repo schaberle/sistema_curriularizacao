@@ -1089,16 +1089,34 @@ export class DatabaseService {
    * Retorna IDs de todos os alunos de uma distribuição
    */
   async getStudentIdsByDistribution(distributionId: string): Promise<string[]> {
-    const { data, error } = await this.client
-      .from('students')
-      .select('id')
-      .eq('distribution_id', distributionId);
+    const pageSize = 1000;
+    const ids: string[] = [];
+    let from = 0;
 
-    if (error) {
-      throw error;
+    while (true) {
+      const to = from + pageSize - 1;
+      const { data, error } = await this.client
+        .from('students')
+        .select('id')
+        .eq('distribution_id', distributionId)
+        .order('id', { ascending: true })
+        .range(from, to);
+
+      if (error) {
+        throw error;
+      }
+
+      const rows = data || [];
+      ids.push(...rows.map((s: any) => String(s.id)));
+
+      if (rows.length < pageSize) {
+        break;
+      }
+
+      from += pageSize;
     }
 
-    return (data || []).map(s => s.id);
+    return ids;
   }
 
   // ============================================================
@@ -1161,20 +1179,38 @@ export class DatabaseService {
 
     // 2. Buscar afinidades onde o student_id está na lista
     // Não precisamos de join se já filtramos pelos IDs corretos
-    const { data, error } = await this.client
-      .from('student_affinities')
-      .select(`
-        student_id,
-        target_student_id,
-        level
-      `)
-      .in('student_id', studentIds);
+    const pageSize = 1000;
+    const allAffinities: any[] = [];
+    let from = 0;
 
-    if (error) {
-      throw error;
+    while (true) {
+      const to = from + pageSize - 1;
+      const { data, error } = await this.client
+        .from('student_affinities')
+        .select(`
+          student_id,
+          target_student_id,
+          level
+        `)
+        .in('student_id', studentIds)
+        .order('id', { ascending: true })
+        .range(from, to);
+
+      if (error) {
+        throw error;
+      }
+
+      const rows = data || [];
+      allAffinities.push(...rows);
+
+      if (rows.length < pageSize) {
+        break;
+      }
+
+      from += pageSize;
     }
 
-    return data || [];
+    return allAffinities;
   }
 
   // ============================================================
@@ -1960,16 +1996,44 @@ export class DatabaseService {
     }[] = [];
 
     if (studentIds.length > 0) {
-      const { data: preferencesData, error: prefsError } = await this.client
-        .from('student_preferences')
-        .select('student_id')
-        .in('student_id', studentIds);
+      const fetchDistinctStudentIds = async (
+        tableName: 'student_preferences' | 'student_affinities'
+      ): Promise<Set<string>> => {
+        const pageSize = 1000;
+        const ids = new Set<string>();
+        let from = 0;
 
-      if (prefsError) {
-        throw prefsError;
-      }
+        while (true) {
+          const to = from + pageSize - 1;
+          const { data, error } = await this.client
+            .from(tableName)
+            .select('student_id')
+            .in('student_id', studentIds)
+            .order('id', { ascending: true })
+            .range(from, to);
 
-      const studentsWithPrefsSet = new Set(preferencesData?.map((p: any) => p.student_id) || []);
+          if (error) {
+            throw error;
+          }
+
+          const rows = data || [];
+          for (const row of rows as any[]) {
+            if (row?.student_id) {
+              ids.add(String(row.student_id));
+            }
+          }
+
+          if (rows.length < pageSize) {
+            break;
+          }
+
+          from += pageSize;
+        }
+
+        return ids;
+      };
+
+      const studentsWithPrefsSet = await fetchDistinctStudentIds('student_preferences');
       studentsWithPreferences = studentsWithPrefsSet.size;
       studentPreferenceStatuses = (students || [])
         .map((student: any) => ({
@@ -1979,16 +2043,7 @@ export class DatabaseService {
         }))
         .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 
-      const { data: affinitiesData, error: affError } = await this.client
-        .from('student_affinities')
-        .select('student_id')
-        .in('student_id', studentIds);
-
-      if (affError) {
-        throw affError;
-      }
-
-      const studentsWithAffinitiesSet = new Set(affinitiesData?.map((a: any) => a.student_id) || []);
+      const studentsWithAffinitiesSet = await fetchDistinctStudentIds('student_affinities');
       studentsWithAffinities = studentsWithAffinitiesSet.size;
     }
 
