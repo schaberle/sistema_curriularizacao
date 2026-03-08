@@ -21,14 +21,14 @@ export function Step9_FinalResultsPage() {
   } = useDistribution();
   const { addToast } = useToast();
 
-  const handleManualMove = async (studentId: string, targetGroupId: string) => {
+  const handleManualMove = async (sourceStudentId: string, targetStudentId: string) => {
     if (!distributionId) return;
 
     try {
-      await actions.moveStudent(distributionId, studentId, targetGroupId);
-      addToast({ type: 'success', message: 'Aluno movido e metricas recalculadas.' });
+      await actions.moveStudent(distributionId, sourceStudentId, targetStudentId);
+      addToast({ type: 'success', message: 'Troca aplicada e metricas recalculadas.' });
     } catch (error: any) {
-      addToast({ type: 'error', message: error?.message || 'Falha ao mover aluno.' });
+      addToast({ type: 'error', message: error?.message || 'Falha ao aplicar troca de alunos.' });
     }
   };
 

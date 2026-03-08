@@ -73,9 +73,12 @@ export interface OrganizerStudentRemovalResult {
 
 export interface OrganizerManualStudentMoveResult {
   distributionId: string;
-  movedStudentId: string;
+  sourceStudentId: string;
+  targetStudentId: string;
   sourceGroupId: string;
   targetGroupId: string;
+  swapViable: boolean;
+  viabilityMessage?: string;
   totalEnergyPhase1: number;
   totalEnergyPhase2?: number;
   groups: Group[];
@@ -435,8 +438,8 @@ export interface DistributionContextActions {
   markExecutionPending: (distributionId: string, scope: 'phase1' | 'phase2') => Promise<void>;
   moveStudent: (
     distributionId: string,
-    studentId: string,
-    targetGroupId: string
+    sourceStudentId: string,
+    targetStudentId: string
   ) => Promise<OrganizerManualStudentMoveResult>;
 
   // Error Management

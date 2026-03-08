@@ -525,12 +525,12 @@ export function DistributionProvider({ children }: DistributionProviderProps) {
   );
 
   const moveStudent = useCallback(
-    async (distributionId: string, studentId: string, targetGroupId: string) => {
+    async (distributionId: string, sourceStudentId: string, targetStudentId: string) => {
       setLoading('moveStudent', true);
       setError('moveStudent', null);
 
       try {
-        const moveResult = await moveOrganizerStudentApi(distributionId, studentId, targetGroupId);
+        const moveResult = await moveOrganizerStudentApi(distributionId, sourceStudentId, targetStudentId);
 
         setState((prev) => ({
           ...prev,
@@ -550,7 +550,7 @@ export function DistributionProvider({ children }: DistributionProviderProps) {
 
         return moveResult;
       } catch (error: any) {
-        const errorMessage = error?.message || 'Erro ao mover aluno';
+        const errorMessage = error?.message || 'Erro ao trocar alunos';
         setError('moveStudent', errorMessage);
         throw error;
       } finally {

@@ -15,7 +15,7 @@ interface Phase1ResultsViewProps {
   onPhase2: () => void;
   onReexecute: () => void;
   onList: () => void;
-  onManualMove: (studentId: string, targetGroupId: string) => Promise<void> | void;
+  onManualMove: (sourceStudentId: string, targetStudentId: string) => Promise<void> | void;
   movingStudent?: boolean;
 }
 

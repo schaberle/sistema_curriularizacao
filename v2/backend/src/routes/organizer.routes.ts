@@ -377,11 +377,16 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
         try {
             const organizerId = (0, auth_middleware_1.getOrganizerIdFromRequest)(req);
             const distributionId = req.params.distributionId;
-            const studentId = String(req.body?.studentId || '').trim();
-            const targetGroupId = String(req.body?.targetGroupId || '').trim();
-            if (!studentId || !targetGroupId) {
+            const sourceStudentId = String(req.body?.studentId || '').trim();
+            const targetStudentId = String(req.body?.targetStudentId || '').trim();
+            if (!sourceStudentId || !targetStudentId) {
                 return res.status(400).json({
-                    error: 'Informe studentId e targetGroupId.',
+                    error: 'Informe studentId e targetStudentId.',
+                });
+            }
+            if (sourceStudentId === targetStudentId) {
+                return res.status(400).json({
+                    error: 'Selecione dois alunos diferentes para realizar a troca.',
                 });
             }
             const distribution = await database.getDistribution(distributionId);
@@ -395,47 +400,107 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
                     error: 'Voce nao tem permissao para acessar esta distribuicao',
                 });
             }
-            const sourceGroup = await database.getStudentGroup(studentId, distributionId);
+            const sourceGroup = await database.getStudentGroup(sourceStudentId, distributionId);
             if (!sourceGroup) {
                 return res.status(404).json({
-                    error: 'Aluno nao esta alocado em nenhum grupo desta distribuicao.',
+                    error: 'Aluno de origem nao esta alocado em nenhum grupo desta distribuicao.',
                 });
             }
-            if (String(sourceGroup.id) === targetGroupId) {
-                return res.status(400).json({
-                    error: 'O grupo de destino deve ser diferente do grupo atual.',
-                });
-            }
-            const targetGroup = await database.getGroup(targetGroupId);
-            if (!targetGroup || String(targetGroup.distribution_id) !== distributionId) {
+            const targetGroup = await database.getStudentGroup(targetStudentId, distributionId);
+            if (!targetGroup) {
                 return res.status(404).json({
-                    error: 'Grupo de destino nao encontrado nesta distribuicao.',
+                    error: 'Aluno de destino nao esta alocado em nenhum grupo desta distribuicao.',
                 });
             }
-            const sourceGroupMembers = await database.getGroupStudents(String(sourceGroup.id));
+            const sourceGroupId = String(sourceGroup.id);
+            const targetGroupId = String(targetGroup.id);
+            if (sourceGroupId === targetGroupId) {
+                return res.status(400).json({
+                    error: 'A troca deve ocorrer entre grupos diferentes.',
+                });
+            }
+            const normalizeCourse = (course) => String(course || '').toUpperCase() === 'ME' ? 'MECHANICAL' : 'ELECTRICAL';
+            const buildMemberProfile = async (studentId) => {
+                const student = await database.getStudent(studentId);
+                if (!student || String(student.distribution_id) !== distributionId) {
+                    return null;
+                }
+                return {
+                    id: studentId,
+                    course: normalizeCourse(student.course),
+                    phase: Number(student.phase),
+                };
+            };
+            const validateGroupComposition = (groupLabel, members) => {
+                const reasons = [];
+                const size = members.length;
+                if (size < 3 || size > 5) {
+                    reasons.push(`${groupLabel}: quantidade de alunos fora do intervalo permitido (3-5).`);
+                }
+                const electricalCount = members.filter((member) => member.course === 'ELECTRICAL').length;
+                const maxElectrical = size >= 4 ? 2 : Math.min(2, Math.max(0, size - 1));
+                if (electricalCount < 1 || electricalCount > maxElectrical) {
+                    reasons.push(`${groupLabel}: composicao de Eletrica invalida (${electricalCount} EE).`);
+                }
+                const distinctPhases = new Set(members.map((member) => member.phase)).size;
+                if (distinctPhases < 2) {
+                    reasons.push(`${groupLabel}: diversidade de fases insuficiente (minimo 2).`);
+                }
+                return reasons;
+            };
+            const sourceGroupMembers = await database.getGroupStudents(sourceGroupId);
             const targetGroupMembers = await database.getGroupStudents(targetGroupId);
-            if (!sourceGroupMembers.includes(studentId)) {
+            if (!sourceGroupMembers.includes(sourceStudentId)) {
                 return res.status(400).json({
-                    error: 'Aluno nao encontrado no grupo de origem.',
+                    error: 'Aluno de origem nao encontrado no grupo de origem.',
                 });
             }
-            if (targetGroupMembers.includes(studentId)) {
+            if (!targetGroupMembers.includes(targetStudentId)) {
                 return res.status(400).json({
-                    error: 'Aluno ja pertence ao grupo de destino.',
+                    error: 'Aluno de destino nao encontrado no grupo de destino.',
                 });
             }
-            if (sourceGroupMembers.length <= 3) {
-                return res.status(400).json({
-                    error: 'Nao e possivel mover: grupo de origem ficaria com menos de 3 alunos.',
+            const [sourceStudentProfile, targetStudentProfile, sourceMembersProfileRaw, targetMembersProfileRaw] = await Promise.all([
+                buildMemberProfile(sourceStudentId),
+                buildMemberProfile(targetStudentId),
+                Promise.all(sourceGroupMembers.map((memberId) => buildMemberProfile(memberId))),
+                Promise.all(targetGroupMembers.map((memberId) => buildMemberProfile(memberId))),
+            ]);
+            if (!sourceStudentProfile || !targetStudentProfile) {
+                return res.status(404).json({
+                    error: 'Nao foi possivel localizar os alunos selecionados nesta distribuicao.',
                 });
             }
-            if (targetGroupMembers.length >= 5) {
+            const sourceMembersProfile = sourceMembersProfileRaw.filter(Boolean);
+            const targetMembersProfile = targetMembersProfileRaw.filter(Boolean);
+            if (sourceMembersProfile.length !== sourceGroupMembers.length || targetMembersProfile.length !== targetGroupMembers.length) {
                 return res.status(400).json({
-                    error: 'Nao e possivel mover: grupo de destino ja possui 5 alunos.',
+                    error: 'Inconsistencia ao validar composicao dos grupos para troca manual.',
                 });
             }
-            await database.removeStudentFromGroup(String(sourceGroup.id), studentId);
-            await database.addStudentToGroup(targetGroupId, studentId);
+            const sourceAfterSwap = sourceMembersProfile
+                .filter((member) => member.id !== sourceStudentId)
+                .concat(targetStudentProfile);
+            const targetAfterSwap = targetMembersProfile
+                .filter((member) => member.id !== targetStudentId)
+                .concat(sourceStudentProfile);
+            const viabilityReasons = [
+                ...validateGroupComposition('Grupo de origem', sourceAfterSwap),
+                ...validateGroupComposition('Grupo de destino', targetAfterSwap),
+            ];
+            if (viabilityReasons.length > 0) {
+                return res.status(400).json({
+                    error: `Troca inviavel: ${viabilityReasons[0]}`,
+                    data: {
+                        swapViable: false,
+                        reasons: viabilityReasons,
+                    },
+                });
+            }
+            await database.removeStudentFromGroup(sourceGroupId, sourceStudentId);
+            await database.removeStudentFromGroup(targetGroupId, targetStudentId);
+            await database.addStudentToGroup(sourceGroupId, targetStudentId);
+            await database.addStudentToGroup(targetGroupId, sourceStudentId);
             const studentsBuild = await buildStudentsWithPreferences(distributionId);
             const themesData = await database.getThemesByDistribution(distributionId);
             const themes = buildThemes(distributionId, themesData || []);
@@ -455,9 +520,12 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
                 success: true,
                 data: {
                     distributionId,
-                    movedStudentId: studentId,
-                    sourceGroupId: String(sourceGroup.id),
+                    sourceStudentId,
+                    targetStudentId,
+                    sourceGroupId: sourceGroupId,
                     targetGroupId,
+                    swapViable: true,
+                    viabilityMessage: 'Troca viavel aplicada com sucesso.',
                     totals: metrics.totals,
                     groups: metrics.groups.map((group) => ({
                         id: group.id,
@@ -478,9 +546,9 @@ export function createOrganizerRoutes(database, authService, officialRegistrySer
             });
         }
         catch (error) {
-            console.error('[manual-move-student] Error:', error);
+            console.error('[manual-swap-students] Error:', error);
             res.status(500).json({
-                error: 'Erro ao mover aluno manualmente',
+                error: 'Erro ao trocar alunos manualmente',
             });
         }
     }));

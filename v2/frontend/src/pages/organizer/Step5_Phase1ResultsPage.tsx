@@ -16,14 +16,14 @@ export function Step5_Phase1ResultsPage() {
   const { currentDistribution, phase1Report, groups, loading, errors, actions } = useDistribution();
   const { addToast } = useToast();
 
-  const handleManualMove = async (studentId: string, targetGroupId: string) => {
+  const handleManualMove = async (sourceStudentId: string, targetStudentId: string) => {
     if (!distributionId) return;
 
     try {
-      await actions.moveStudent(distributionId, studentId, targetGroupId);
-      addToast({ type: 'success', message: 'Aluno movido e energia recalculada com sucesso.' });
+      await actions.moveStudent(distributionId, sourceStudentId, targetStudentId);
+      addToast({ type: 'success', message: 'Troca aplicada e energia recalculada com sucesso.' });
     } catch (error: any) {
-      addToast({ type: 'error', message: error?.message || 'Falha ao mover aluno.' });
+      addToast({ type: 'error', message: error?.message || 'Falha ao aplicar troca de alunos.' });
     }
   };
 

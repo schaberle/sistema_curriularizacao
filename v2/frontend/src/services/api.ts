@@ -249,9 +249,12 @@ function normalizeGroups(rawGroups: any[] = [], distributionId: string): Group[]
 function normalizeManualStudentMoveResult(raw: any, distributionId: string): OrganizerManualStudentMoveResult {
   return {
     distributionId: String(raw?.distributionId ?? distributionId),
-    movedStudentId: String(raw?.movedStudentId ?? ''),
+    sourceStudentId: String(raw?.sourceStudentId ?? raw?.movedStudentId ?? ''),
+    targetStudentId: String(raw?.targetStudentId ?? ''),
     sourceGroupId: String(raw?.sourceGroupId ?? ''),
     targetGroupId: String(raw?.targetGroupId ?? ''),
+    swapViable: Boolean(raw?.swapViable ?? true),
+    viabilityMessage: raw?.viabilityMessage ? String(raw.viabilityMessage) : undefined,
     totalEnergyPhase1: Number(raw?.totals?.totalEnergyPhase1 ?? 0),
     totalEnergyPhase2:
       raw?.totals?.totalEnergyPhase2 !== undefined
@@ -1126,7 +1129,7 @@ class APIClient {
 
   async moveDistributionStudent(
     distributionId: string,
-    payload: { studentId: string; targetGroupId: string }
+    payload: { studentId: string; targetStudentId: string }
   ) {
     const response = await this.client.post(
       `/api/organizer/distributions/${distributionId}/manual-move-student`,
@@ -1304,11 +1307,14 @@ export async function removeOrganizerStudent(
 
 export async function moveOrganizerStudent(
   distributionId: string,
-  studentId: string,
-  targetGroupId: string
+  sourceStudentId: string,
+  targetStudentId: string
 ): Promise<OrganizerManualStudentMoveResult> {
-  const response = (await api.moveDistributionStudent(distributionId, { studentId, targetGroupId })) as LegacyResponse<any>;
-  const data = ensureSuccess(response, 'Falha ao mover aluno entre grupos');
+  const response = (await api.moveDistributionStudent(distributionId, {
+    studentId: sourceStudentId,
+    targetStudentId,
+  })) as LegacyResponse<any>;
+  const data = ensureSuccess(response, 'Falha ao trocar alunos entre grupos');
   return normalizeManualStudentMoveResult(data, distributionId);
 }
 

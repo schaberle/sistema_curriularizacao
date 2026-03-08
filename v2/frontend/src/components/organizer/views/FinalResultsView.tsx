@@ -12,7 +12,7 @@ interface FinalResultsViewProps {
   onList: () => void;
   onBackPhase1: () => void;
   onReexecutePhase2: () => void;
-  onManualMove: (studentId: string, targetGroupId: string) => Promise<void> | void;
+  onManualMove: (sourceStudentId: string, targetStudentId: string) => Promise<void> | void;
   movingStudent?: boolean;
 }
 
