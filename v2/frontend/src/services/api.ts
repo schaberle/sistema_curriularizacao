@@ -1085,10 +1085,6 @@ class APIClient {
       `/api/organizer/distributions/${distributionId}/statistics`,
       {
         params: { _t: Date.now() },
-        headers: {
-          'Cache-Control': 'no-cache',
-          Pragma: 'no-cache',
-        },
       }
     );
     return response.data;
