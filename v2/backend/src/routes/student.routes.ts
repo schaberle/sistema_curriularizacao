@@ -389,7 +389,12 @@ export function createStudentRoutes(
 
       const memberIds = await database.getGroupStudents(groupData.id);
       const members: any[] = [];
+      const unresolvedMemberIds: string[] = [];
       for (const memberId of memberIds) {
+        if (memberId === studentAuth.studentId) {
+          continue;
+        }
+
         const memberData = await database.getStudent(memberId);
         if (memberData) {
           members.push({
@@ -397,6 +402,32 @@ export function createStudentRoutes(
             name: memberData.name,
             course: memberData.course,
             phase: memberData.phase,
+          });
+        } else {
+          unresolvedMemberIds.push(memberId);
+        }
+      }
+
+      if (unresolvedMemberIds.length > 0) {
+        const activeRegistryEntries = await database.getActiveStudentRegistryEntries(studentAuth.distributionId);
+        const registryByOperationalStudentId = new Map(
+          activeRegistryEntries.map((entry) => [
+            buildOperationalStudentId(studentAuth.distributionId, entry.matriculaHash),
+            entry,
+          ])
+        );
+
+        for (const unresolvedMemberId of unresolvedMemberIds) {
+          const registryEntry = registryByOperationalStudentId.get(unresolvedMemberId);
+          if (!registryEntry) {
+            continue;
+          }
+
+          members.push({
+            id: unresolvedMemberId,
+            name: registryEntry.academico,
+            course: mapOrigemAlunoToCourse(registryEntry.origemAluno) || 'ME',
+            phase: registryEntry.faseTurma,
           });
         }
       }

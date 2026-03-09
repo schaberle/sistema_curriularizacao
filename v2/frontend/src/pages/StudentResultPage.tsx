@@ -298,7 +298,7 @@ export function StudentResultPage() {
                 <div>
                   <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-100 pb-2 flex items-center">
                     <Users className="h-4 w-4 mr-2" />
-                    Integrantes do grupo
+                    Outros integrantes do grupo
                   </h3>
                   <div className="grid sm:grid-cols-2 gap-4">
                     {result.group.members.map((member: any, index: number) => (
