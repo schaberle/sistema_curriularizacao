@@ -1,7 +1,8 @@
-import { BarChart3, LayoutPanelLeft, RotateCcw, Users } from 'lucide-react';
+import { BarChart3, Download, LayoutPanelLeft, RotateCcw, Users } from 'lucide-react';
 import { Button } from '../../common/Button';
 import { ManualStudentMovePanel } from '../ManualStudentMovePanel';
 import { ExecutionReport, Group, SocialMetrics } from '../../../types/distribution.types';
+import { downloadGroupsCSV } from '../../../utils/downloadGroupsCSV';
 
 interface FinalResultsViewProps {
   phase1Report: ExecutionReport | null;
@@ -91,9 +92,20 @@ export function FinalResultsView({
             <Users className="mr-2 h-4 w-4 text-[var(--brand-600)]" />
             Grupos finais
           </h3>
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-            {groups?.length ?? 0} grupos
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+              {groups?.length ?? 0} grupos
+            </span>
+            {groups && groups.length > 0 && (
+              <Button
+                variant="outline"
+                icon={<Download className="h-4 w-4" />}
+                onClick={() => downloadGroupsCSV(groups, 'grupos-finais.csv')}
+              >
+                Baixar tabela
+              </Button>
+            )}
+          </div>
         </header>
         <div className="p-5">
           {loading && (
